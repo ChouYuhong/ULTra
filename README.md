@@ -12,7 +12,7 @@ The following commands launch a slurm job that creates an environment for Meta L
 The env creation should take around 5 minutes without counting downloads. 
 
 ```bash
-git clone git@github.com:fairinternal/lingua.git
+git clone https://github.com/facebookresearch/lingua
 cd lingua
 
 bash setup/create_env.sh
