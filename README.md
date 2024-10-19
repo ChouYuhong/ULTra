@@ -312,4 +312,4 @@ python -m lingua.stool script=apps.main.eval config=apps/main/configs/eval.yaml 
 ```
 ## License
 
-Meta Lingua is licensed under CC-by-NC license. Refer to the LICENSE file in the top level directory.
+Meta Lingua is licensed under BSD-3-Clause license. Refer to the LICENSE file in the top level directory.
