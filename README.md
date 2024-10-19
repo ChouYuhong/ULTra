@@ -19,7 +19,7 @@ bash setup/create_env.sh
 # or if you have access to a slurm cluster
 sbatch setup/create_env.sh
 ```
-Once that is done your can activate the environement 
+Once that is done your can activate the environment 
 ```
 conda activate lingua_<date>
 ```
