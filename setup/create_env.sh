@@ -32,6 +32,7 @@ conda activate $env_prefix
 echo "Currently in env $(which python)"
 
 # Install packages
+pip install numpy
 pip install torch --index-url https://download.pytorch.org/whl/cu121
 pip install ninja
 pip install git+https://github.com/facebookresearch/xformers.git@d3948b5cb9a3711032a0ef0e036e809c7b08c1e0#egg=xformers
