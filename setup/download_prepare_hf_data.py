@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
+import argparse
 import os
 import subprocess
 import sys
@@ -63,14 +64,14 @@ def setup_terashuf(work_dir):
     return terashuf_dir
 
 
-def main(dataset):
+def main(dataset, data_dir):
     # Configuration
     repo_id = {
         "fineweb_edu": "HuggingFaceFW/fineweb-edu",
         "fineweb_edu_10bt": "HuggingFaceFW/fineweb-edu",
         "dclm_baseline_1.0": "mlfoundations/dclm-baseline-1.0",
     }[dataset]
-    src_dir = f"data/{dataset}"
+    src_dir = f"{data_dir}/{dataset}"
     out_dir = f"{src_dir}_shuffled"
     os.makedirs(out_dir, exist_ok=True)
     work_dir = src_dir  # Directory of this Python file
@@ -126,4 +127,10 @@ def main(dataset):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    parser = argparse.ArgumentParser()
+    parser.add_argument("dataset", type=str)
+    parser.add_argument("--data_dir", type=str, default="data")
+
+    args = parser.parse_args()
+
+    main(args.dataset, args.data_dir)
