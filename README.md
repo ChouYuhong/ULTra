@@ -8,7 +8,7 @@ Meta Lingua is a minimal and fast LLM training and inference library designed fo
 
 ## Quick start
 
-The following commands launch a slurm job that creates an environment for Meta Lingua.
+The following commands launch a SLURM job that creates an environment for Meta Lingua.
 The env creation should take around 5 minutes without counting downloads. 
 
 ```bash
@@ -16,7 +16,7 @@ git clone https://github.com/facebookresearch/lingua
 cd lingua
 
 bash setup/create_env.sh
-# or if you have access to a slurm cluster
+# or if you have access to a SLURM cluster
 sbatch setup/create_env.sh
 ```
 Once that is done your can activate the environment 
@@ -26,7 +26,7 @@ conda activate lingua_<date>
 Now launch a debug job to check if everything works.  **The provided configurations are templates, you need to adapt them for them to work (change `dump_dir`, `data.root_dir`, `data.tokenizer.path`, etc ...)**
 
 ```bash
-# stool stands for slurm tool !
+# stool stands for SLURM tool !
 python -m lingua.stool script=apps.main.train config=apps/main/configs/debug.yaml nodes=1 partition=<partition>
 # if you want to launch locally you can use torchrun
 torchrun --nproc-per-node 8 -m apps.main.train config=apps/main/configs/debug.yaml
@@ -196,7 +196,7 @@ will launch training with the config
 DummyArgs(name="tictac", LMTransformerArgs(dim=64, n_layers=24))
 ```
 
-### Launching with slurm
+### Launching with SLURM
 
 Since we want to do distributed training, we need `train.py` to run N times (with N being the number of GPUs)
 
@@ -216,7 +216,7 @@ Or the `launch_job` function directly. This allows you for example to create man
 Since the configuration file is copied to `dump_dir`, an easy way to iterate is to simply change the config file and launch the same command above. 
 
 ## Debugging
-In order to iterate quickly, it is preferable not to have to wait for a slurm allocation every time. You can instead ask slurm to allocate resources for you, then once they're allocated you can run multiple commands on that same allocation. 
+In order to iterate quickly, it is preferable not to have to wait for a SLURM allocation every time. You can instead ask SLURM to allocate resources for you, then once they're allocated you can run multiple commands on that same allocation. 
 
 For example you can do :
 
@@ -224,13 +224,13 @@ For example you can do :
 salloc --nodes 2 --cpus-per-gpu 16 --mem 1760GB --gres=gpu:8 --exclusive --time=72:00:00
 ```
 
-Which will give you access to 2 nodes in your current terminal. Once the allocation is done, you will see some slurm environement variables that were automatically added such as `$SLURM_JOB_ID` and others... This allows you for example to do in the same terminal
+Which will give you access to 2 nodes in your current terminal. Once the allocation is done, you will see some SLURM environement variables that were automatically added such as `$SLURM_JOB_ID` and others... This allows you for example to do in the same terminal
 
 ```bash
 srun -n 16 python -m apps.main.train config=apps/main/configs/debug.yaml
 ```
 
-Which will run the `python -m apps.main.train config=apps/main/configs/debug.yaml` command on each of the 16 GPUs. If this crashes or ends you can just relaunch `srun` again because the nodes are already allocated to you and you don't have to wait for slurm to give you the resources again.
+Which will run the `python -m apps.main.train config=apps/main/configs/debug.yaml` command on each of the 16 GPUs. If this crashes or ends you can just relaunch `srun` again because the nodes are already allocated to you and you don't have to wait for SLURM to give you the resources again.
 
 This will also show you the outputs of all those commands in the same terminal which might become cumbersome. 
 
@@ -280,7 +280,7 @@ python -m lingua.stool script=apps.main.eval config=apps/main/configs/eval.yaml 
  ┃ ┃ ┗ 📜train_state_00001.json
  ┣ 📂code # Backup of the code at the moment the job was launched
  ┣ 📂logs
- ┃ ┗ 📂166172 # Logs for each GPU in this slurm job.
+ ┃ ┗ 📂166172 # Logs for each GPU in this SLURM job.
  ┃ ┃ ┣ 📜166172.stderr
  ┃ ┃ ┣ 📜166172.stdout
  ┃ ┃ ┣ 📜166172_0.err
