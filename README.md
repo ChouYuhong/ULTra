@@ -101,7 +101,7 @@ Nothing is sacred in Meta Lingua. We've specifically tried to make it as easily 
 Here's a quick description of the most important files and features:
 
 - **`transformer.py`** : Defines model architecture. This is pure PyTorch `nn.Module` ! Nothing fancy here. 
-- **`distributed.py`** : Handles distributing the model on multiple GPUs. This is done through parallelize_module function which wraps your vanilla `nn.Module` and applies nearly any combination of Data Parallel, Fully Sharded Data Parallel, Model Parallelism, torch.compile, activation checkpointing and float8. 
+- **`distributed.py`** : Handles distributing the model on multiple GPUs. This is done through `parallelize_module` function which wraps your vanilla `nn.Module` and applies nearly any combination of Data Parallel, Fully Sharded Data Parallel, Model Parallelism, `torch.compile`, activation checkpointing and `float8`. 
 - **`data.py`** : Dataloader for LLM pretraining.
 
 <p align="center">  
