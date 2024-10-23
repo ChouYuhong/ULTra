@@ -23,6 +23,11 @@ Once that is done your can activate the environment
 ```bash
 conda activate lingua_<date>
 ```
+use the provided script to download and prepare data from huggingface (among `fineweb_edu`, `fineweb_edu_10bt`, or `dclm_baseline_1.0`).
+This command will download the `fineweb_edu` and prepare it for training in the `./data` directory, specifying the amount of memory `terashuf` (the tool used to shuffle samples) will be allocated.
+```bash
+python setup/download_prepare_hf_data.py fineweb_edu <MEMORY> --data_dir ./data --seed 42
+```
 Now launch a debug job to check if everything works.  **The provided configurations are templates, you need to adapt them for them to work (change `dump_dir`, `data.root_dir`, `data.tokenizer.path`, etc ...)**
 
 ```bash
