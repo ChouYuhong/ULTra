@@ -20,7 +20,7 @@ bash setup/create_env.sh
 sbatch setup/create_env.sh
 ```
 Once that is done your can activate the environment 
-```
+```bash
 conda activate lingua_<date>
 ```
 Now launch a debug job to check if everything works.  **The provided configurations are templates, you need to adapt them for them to work (change `dump_dir`, `data.root_dir`, `data.tokenizer.path`, etc ...)**
