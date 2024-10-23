@@ -64,7 +64,7 @@ def setup_terashuf(work_dir):
     return terashuf_dir
 
 
-def main(dataset, data_dir):
+def main(dataset, memory, data_dir, seed=42):
     # Configuration
     repo_id = {
         "fineweb_edu": "HuggingFaceFW/fineweb-edu",
@@ -105,8 +105,8 @@ def main(dataset, data_dir):
         parquet_to_jsonl(dataset, work_dir, src_dir, src_dir)
 
     # Set up environment variables
-    os.environ["MEMORY"] = "1000.0"
-    os.environ["SEED"] = "42"
+    os.environ["MEMORY"] = f"{memory}"
+    os.environ["SEED"] = f"{seed}"
 
     # Run the original shuffling and splitting command
     terashuf_executable = os.path.join(terashuf_dir, "terashuf")
@@ -129,8 +129,10 @@ def main(dataset, data_dir):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset", type=str)
+    parser.add_argument("memory", type=float, default=8)
     parser.add_argument("--data_dir", type=str, default="data")
+    parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
 
-    main(args.dataset, args.data_dir)
+    main(args.dataset, args.memory, args.data_dir, args.seed)
