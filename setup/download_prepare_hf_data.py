@@ -9,11 +9,7 @@ from huggingface_hub import snapshot_download
 
 def run_command(command):
     print(f"Running: {command}")
-    try:
-        subprocess.run(command, shell=True, check=True)
-    except Exception as e:
-        print(f"Error: {e}")
-        sys.exit(1)
+    subprocess.run(command, shell=True, check=True)
 
 
 def download_dataset(repo_id, local_dir, allow_patterns):
