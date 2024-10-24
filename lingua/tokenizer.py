@@ -8,20 +8,10 @@ from typing import List, Optional, Tuple
 import logging
 import os
 
-try:
-    from sentencepiece import SentencePieceProcessor
-
-    has_sp = True
-except ImportError:
-    has_sp = False
-
-try:
-    import tiktoken
-    from tiktoken.load import load_tiktoken_bpe
-
-    has_tiktoken = True
-except ImportError:
-    has_tiktoken = False
+from sentencepiece import SentencePieceProcessor
+import tiktoken
+from tiktoken.load import load_tiktoken_bpe
+from transformers import PreTrainedTokenizerFast as HFTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -198,16 +188,37 @@ class TikTokenTokenizer(Tokenizer):
         return substrs, offsets
 
 
+class HuggingFaceTokenizer(Tokenizer):
+    def __init__(self, model_path):
+        self.hf_tokenizer = HFTokenizer.from_pretrain(model_path)
+        self.bos_id: int = self.hf_tokenizer.encode(self.hf_tokenizer.bos_token)
+        self.eos_id: int = self.hf_tokenizer.encode(self.hf_tokenizer.eos_token)
+        self.n_words: int = self.hf_tokenizer.model_max_length
+
+    def encode(self, tokens, add_bos, add_eos):
+        return (
+            [self.bos_id] * add_bos
+            + self.hf_tokenizer.encode(tokens)
+            + [self.eos_id] * add_eos
+        )
+
+    def decode(self, tokens):
+        return self.hf_tokenizer.decode(tokens)
+
+    def get_token_offsets(self, text, tokens=None):
+        pass
+
+
 def build_tokenizer(name: str, path: Optional[str] = None) -> Tokenizer:
     if name == "bytes":
         return ByteTokenizer()
     elif name == "mock":
         return MockTokenizer()
     elif name == "sp":
-        assert has_sp, "sentencepiece not installed"
         return SentencePieceTokenizer(path)
     elif name == "tiktoken":
-        assert has_tiktoken, "tiktoken not installed"
         return TikTokenTokenizer(path)
+    elif name == "huggingface":
+        return HuggingFaceTokenizer(path)
     else:
         raise NotImplementedError(f"{name} tokenizer type is not implemented")

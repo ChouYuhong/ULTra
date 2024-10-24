@@ -5,6 +5,7 @@ rouge-score
 sacrebleu
 sentencepiece
 tiktoken
+tokenizers
 fsspec
 blobfile
 wandb
