@@ -11,7 +11,6 @@ import os
 from sentencepiece import SentencePieceProcessor
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
-from transformers import PreTrainedTokenizerFast as HFTokenizer
 
 logger = logging.getLogger(__name__)
 
