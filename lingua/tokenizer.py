@@ -188,27 +188,6 @@ class TikTokenTokenizer(Tokenizer):
         return substrs, offsets
 
 
-class HuggingFaceTokenizer(Tokenizer):
-    def __init__(self, model_path):
-        self.hf_tokenizer = HFTokenizer.from_pretrain(model_path)
-        self.bos_id: int = self.hf_tokenizer.encode(self.hf_tokenizer.bos_token)
-        self.eos_id: int = self.hf_tokenizer.encode(self.hf_tokenizer.eos_token)
-        self.n_words: int = self.hf_tokenizer.model_max_length
-
-    def encode(self, tokens, add_bos, add_eos):
-        return (
-            [self.bos_id] * add_bos
-            + self.hf_tokenizer.encode(tokens)
-            + [self.eos_id] * add_eos
-        )
-
-    def decode(self, tokens):
-        return self.hf_tokenizer.decode(tokens)
-
-    def get_token_offsets(self, text, tokens=None):
-        pass
-
-
 def build_tokenizer(name: str, path: Optional[str] = None) -> Tokenizer:
     if name == "bytes":
         return ByteTokenizer()
@@ -218,7 +197,5 @@ def build_tokenizer(name: str, path: Optional[str] = None) -> Tokenizer:
         return SentencePieceTokenizer(path)
     elif name == "tiktoken":
         return TikTokenTokenizer(path)
-    elif name == "huggingface":
-        return HuggingFaceTokenizer(path)
     else:
         raise NotImplementedError(f"{name} tokenizer type is not implemented")
