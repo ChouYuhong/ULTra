@@ -4,7 +4,9 @@
 
 Meta Lingua is a minimal and fast LLM training and inference library designed for research. Meta Lingua uses easy-to-modify PyTorch components in order to try new architectures, losses, data, etc. We aim for this code to enable end to end training, inference and evaluation as well as provide tools to better understand speed and stability. While Meta Lingua is currently under development, we provide you with multiple `apps` to showcase how to use this codebase.
 
-![Overview of lingua](lingua_overview.svg)
+<p align="center">  
+ <img src="lingua_overview.svg" width="100%"/>
+</p>
 
 ## Quick start
 
@@ -27,6 +29,10 @@ use the provided script to download and prepare data from huggingface (among `fi
 This command will download the `fineweb_edu` and prepare it for training in the `./data` directory, specifying the amount of memory `terashuf` (the tool used to shuffle samples) will be allocated.
 ```bash
 python setup/download_prepare_hf_data.py fineweb_edu <MEMORY> --data_dir ./data --seed 42
+```
+to download tokenizer (here llama3), use the folowing script:
+```bash
+python setup/download_tokenizer.py llama3 <SAVE_PATH> --api_key <HUGGINGFACE_TOKEN>
 ```
 Now launch a debug job to check if everything works.  **The provided configurations are templates, you need to adapt them for them to work (change `dump_dir`, `data.root_dir`, `data.tokenizer.path`, etc ...)**
 
