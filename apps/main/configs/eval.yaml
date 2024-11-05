@@ -1,6 +1,6 @@
 name: "debug_evals"
-# ckpt_dir: !!CHANGETHIS!!
-# dump_dir: !!CHANGETHIS!!
+ckpt_dir: "/checkpoint/amaia/codegen/mvideau/xldumps/fastRNN/lingua_transformer_fp8_same_fwd_bwd/checkpoints/0000060000"
+dump_dir: "/checkpoint/amaia/codegen/mvideau/xldumps/fastRNN/lingua_transformer_fp8_same_fwd_bwd/evals/0000060000"
 generator:
   max_tokens: 8192
   dtype: bf16
@@ -13,19 +13,21 @@ harness:
       dataset_kwargs:
         trust_remote_code: true
     - task: nq_open
-      num_fewfixeshot: 5
-  # - piqa
-  # - siqa
-  # - tqa
-  # - winogrande
-  # - obqa
-  # - arc_easy
-  # - arc_challenge
-  # - race_middle
-  # - race_high
-  # - gsm8k
-  # - bbh
-  # - copa
-  # - human_eval_plus
-  # - mbpp
-  # - mmlu
+      num_fewshot: 5
+    - piqa
+    - task: social_iqa
+      dataset_kwargs:
+        trust_remote_code: true
+    - triviaqa
+    - winogrande
+    - openbookqa
+    - arc_easy
+    - arc_challenge
+    - race
+    - commonsense_qa
+    # - coqa
+    - copa
+    - gsm8k
+    - bbh
+    - mmlu
+    - mmlu_pro

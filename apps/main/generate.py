@@ -195,7 +195,7 @@ class PackedCausalTransformerGenerator:
                     module.kv_cache = KVCache(
                         1,
                         self.max_tokens,
-                        module.n_heads,
+                        module.n_kv_heads,
                         module.head_dim,
                         self.dtype,
                         self.device,
