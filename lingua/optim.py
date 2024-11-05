@@ -91,6 +91,11 @@ def lr_wsd(
     elif step <= curr_n_steps - decay_length:
         lr = 1.0
     elif step > curr_n_steps - decay_length and step <= curr_n_steps:
+        # Linear interpolation gives similar results
+        # slope = -(1.0 - min_ratio) / decay_length
+        # intercept = min_ratio + ((1.0 - min_ratio) * curr_n_steps) / decay_length
+        # lr = slope * step + intercept
+
         step = step - (curr_n_steps - decay_length)
         lr = 1/((step/curr_n_steps)*(1/min_ratio) + (1 - step/curr_n_steps))
     else:
