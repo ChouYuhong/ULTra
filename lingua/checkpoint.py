@@ -109,7 +109,7 @@ class CheckpointManager:
         self.init_ckpt_path = args.init_ckpt_path
         self.continue_training_from_init = args.continue_training_from_init
 
-        os.makedirs(self.path, exist_ok=True)
+        assert os.path.exists(self.path), f"Path {self.path} does not exist and needs to be created before using CheckpointManager (use instantiate_and_make_dir)"
 
         self.existing_saves = self.get_existing_saves()
 
@@ -300,3 +300,11 @@ class CheckpointManager:
             optim_state_dict=state_dict["optim"],
         )
         logger.info("Model and optim reloaded")
+    
+    @classmethod
+    def instantiate_and_make_dir(cls, args: CheckpointArgs):
+        if get_is_master():
+            os.makedirs(args.path, exist_ok=True)
+        dist.barrier()
+
+        return cls(args)

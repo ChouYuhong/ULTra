@@ -324,7 +324,7 @@ def train(args: TrainArgs):
             scheduler=scheduler,
         )
 
-        checkpoint = CheckpointManager(args.checkpoint)
+        checkpoint = CheckpointManager.instantiate_and_make_dir(args.checkpoint)
         checkpoint.load(model, optimizer, train_state, world_mesh)
         # Either load from latest checkpoint or start from scratch
         if args.probe_freq is not None:
