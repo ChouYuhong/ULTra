@@ -579,7 +579,7 @@ def train(args: TrainArgs):
                         launch_job(
                             StoolArgs(
                                 asdict(eval_args),
-                                script="apps.fastRNN.internal",
+                                script="apps.fastRNN.eval",
                                 copy_code=False,
                                 nodes=args.async_eval_gpus // 8,
                                 qos="lowest",

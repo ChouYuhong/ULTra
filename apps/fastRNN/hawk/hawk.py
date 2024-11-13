@@ -47,13 +47,14 @@ class LMHawk(BaseHawk):
         self,
         token_values: torch.Tensor,
         target: Optional[torch.Tensor] = None,
+        tok_idx: Optional[torch.Tensor] = None,
         cu_seqlens: Optional[int] = None,
         impl: str = "parallel",
     ) -> torch.Tensor:
 
         h = self.tok_embeddings(token_values)
 
-        h = super().forward(h, cu_seqlens=cu_seqlens, impl=impl)
+        h = super().forward(h, tok_idx=tok_idx, cu_seqlens=cu_seqlens, impl=impl)
 
         logits = self.output(self.norm(h))
         if target is not None:

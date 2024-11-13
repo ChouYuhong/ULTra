@@ -61,7 +61,6 @@ logging:
 
 async_eval_gpus: 8
 eval:
-  dataset_dir: datasets/eval
   harness:
     tasks:
       - hellaswag
