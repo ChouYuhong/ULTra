@@ -132,7 +132,7 @@ class EvalHarnessLM(LM):
         _, lls, greedy = self.generator.generate(inputs)
         results = []
         for p, ll, gr in zip(prompts, lls, greedy):
-            p_len = len(self.generator.tokenizer.encode(p, add_bos=True, add_eos=False))
+            p_len = len(self.generator.tokenizer.encode(p, add_bos=False, add_eos=False))
             results.append((ll[p_len:].sum().item(), gr[p_len:].all().item()))
 
         self.generator.max_gen_len = max_gen_len

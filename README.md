@@ -44,6 +44,11 @@ torchrun --nproc-per-node 8 -m apps.main.train config=apps/main/configs/debug.ya
 # or you can also launch on 1 GPU
 python -m apps.main.train config=apps/main/configs/debug.yaml
 ```
+
+When using `stool`, if a job crashes, it can be relaunched using sbatch:
+```bash
+sbatch path/to/dump_dir/submit.slurm
+```
 ## Training Results 
 
 We get very strong performance on many downstream tasks and match the performance of [DCLM baseline 1.0](https://arxiv.org/abs/2406.11794).
