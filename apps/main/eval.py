@@ -197,7 +197,7 @@ def eval_on_val(generator, val_args: ValidationArgs, train_cfg):
             tmp = ll.sum().item()
             metrics['nll'].append(tmp)
             metrics['nll_per_token'].append(tmp / len(ll))
-            metrics['nll_per_char'].append(tmp / (len(ll) * len(texts[i])))
+            metrics['nll_per_char'].append(tmp / len(texts[i]))
 
             metrics['avg_seqlen'].append(len(ll))
         
