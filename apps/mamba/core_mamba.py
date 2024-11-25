@@ -315,7 +315,6 @@ class SSM(nn.Module):
         # Linear layers
         in_init_std = init_std or (self.dim ** (-0.5))
         out_init_std = init_std or (self.hidden_dim ** (-0.5))
-        in_init_std = in_init_std / factor
         out_init_std = out_init_std / factor
 
         nn.init.trunc_normal_(
