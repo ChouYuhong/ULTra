@@ -86,6 +86,8 @@ eval:
       # - triviaqa
       # - gsm8k
       # - bbh
+  validation:
+    max_steps: 1000
   generator:
     max_tokens: 16384
     dtype: bf16

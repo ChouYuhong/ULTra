@@ -86,6 +86,8 @@ eval:
       # - task: nq_open
       #   num_fewshot: 5
       # - triviaqa
+  validation:
+    max_steps: 1000
   generator:
     compile_prefilling: false
     reduce_generation_overhead: true

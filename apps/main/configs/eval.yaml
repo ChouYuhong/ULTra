@@ -31,3 +31,5 @@ harness:
     - bbh
     - mmlu
     - mmlu_pro
+validation:
+  max_steps: 1000

@@ -55,7 +55,7 @@ def load_consolidated_model_and_tokenizer(consolidated_path):
     model = model.cuda().eval()
     for param in model.parameters():
         param.data = param.data.to(dtype=param_dtype)
-    return model, tokenizer
+    return model, tokenizer, config
 
 
 class StateCache(nn.Module):
@@ -180,7 +180,7 @@ def main():
     gen_cfg = dataclass_from_dict(PackedRNNGeneratorArgs, cfg, strict=False)
     print(cfg)
 
-    model, tokenizer = load_consolidated_model_and_tokenizer(cfg.ckpt)
+    model, tokenizer, _ = load_consolidated_model_and_tokenizer(cfg.ckpt)
 
     generator = PackedRNNGenerator(gen_cfg, model, tokenizer)
 

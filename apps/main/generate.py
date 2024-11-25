@@ -420,7 +420,7 @@ def load_consolidated_model_and_tokenizer(
     model = model.cuda().eval()
     for param in model.parameters():
         param.data = param.data.to(dtype=param_dtype)
-    return model, tokenizer
+    return model, tokenizer, config
 
 
 def main():
@@ -431,7 +431,7 @@ def main():
     )
     print(cfg)
 
-    model, tokenizer = load_consolidated_model_and_tokenizer(cfg.ckpt)
+    model, tokenizer, _ = load_consolidated_model_and_tokenizer(cfg.ckpt)
 
     generator = PackedCausalTransformerGenerator(gen_cfg, model, tokenizer)
 
