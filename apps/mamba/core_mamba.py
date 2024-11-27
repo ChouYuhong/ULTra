@@ -360,6 +360,7 @@ class SSM(nn.Module):
         self.A_log.log_()
 
         self.D.data.fill_(1.0)
+        self.ssm_norm.reset_parameters()
 
 
 class MambaBlock(nn.Module):
