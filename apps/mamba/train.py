@@ -425,6 +425,7 @@ def train(args: TrainArgs):
             loss = loss.detach() * args.grad_acc_steps
 
             # optimizer step
+            grad_norm = -1.0
             if train_state.acc_step == 0:
                 # Warning: FSDP + clip grad norm for_each=true triggers seg faults on pytorch nightly
                 grad_norm = torch.nn.utils.clip_grad_norm_(
