@@ -334,7 +334,7 @@ We believe this targeted approach helps researchers make progress faster without
 
 ```
 @misc{meta_lingua,
-  author = {Mathurin Videau, Badr Youbi Idrissi, Daniel Haziza, Luca Wehrstedt, Jade Copet, Olivier Teytaud, David Lopez-Paz},
+  author = {Mathurin Videau and Badr Youbi Idrissi and Daniel Haziza and Luca Wehrstedt and Jade Copet and Olivier Teytaud and David Lopez-Paz},
   title = {{Meta Lingua}: A minimal {PyTorch LLM} training library},
   url = {https://github.com/facebookresearch/lingua},
   year = {2024}
