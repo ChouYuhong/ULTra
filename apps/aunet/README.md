@@ -2,9 +2,9 @@
 
 **Mathurin Videau**\*, **Badr Youbi Idrissi**\*, Alessandro Leite, March Schoenauer, Olivier Teytaud, David Lopez-Paz. \***Equal and main contribution**
 
-[[`arXiv`]()]
+[[`arXiv`](https://arxiv.org/abs/2506.14761)]
 
-This repository contains the official implementation of AU-Nets. For details, refer to our paper [**From Bytes to Ideas: Language Modeling with Autoregressive U-Nets**]().
+This repository contains the official implementation of AU-Nets. For details, refer to our paper [**From Bytes to Ideas: Language Modeling with Autoregressive U-Nets**](https://arxiv.org/abs/2506.14761).
 
 
 
@@ -90,10 +90,10 @@ You can implement custom pooling classes, as long as they maintain the same inte
 ## Citation
 
 ```
-@article{
-  author = {...},
+@article{videau2025bytesideaslanguagemodeling,
+  author = {Mathurin Videau and Badr Youbi Idrissi and Alessandro Leite and Marc Schoenauer and Olivier Teytaud and David Lopez-Paz},
   title = {From Bytes to Ideas: Language Modeling with Autoregressive U-Nets},
-  journal = {arXiv preprint arXiv:xxxxx},
-  year = 2025
+  journal = {arXiv preprint arXiv:2506.14761},
+  year = {2025}
 }
 ```
