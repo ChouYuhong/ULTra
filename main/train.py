@@ -64,8 +64,10 @@ from apps.main.transformer import (
     tp_parallelize,
     get_no_recompute_ops,
 )
-from lingua.probe import AutoProbeD
-from lingua.stool import StoolArgs, launch_job
+from lingua.model import (
+    reinit_weights,
+    load_model_from_config,
+)
 
 import wandb
 
