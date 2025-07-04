@@ -44,6 +44,41 @@ class MockTokenizer(Tokenizer):
     def encode(self, tokens, add_bos, add_eos):
         return tokens
 
+class HFTokenizer(Tokenizer):
+    def __init__(self, path):
+        from transformers import AutoTokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(path)
+        self.bos_id = self.tokenizer.bos_token_id
+        self.eos_id = self.tokenizer.eos_token_id
+        self.n_words = self.tokenizer.vocab_size
+    
+    def encode(self, s: str, add_bos: bool, add_eos: bool):
+        return (
+            [self.bos_id] * add_bos + self.tokenizer.encode(s, add_special_tokens=False) + [self.eos_id] * add_eos
+        )
+    
+    def decode(self, tokens: List[int]):
+        return self.tokenizer.decode(tokens)
+    
+    def get_token_offsets(self, text, tokens=None):
+        # This implementation comes from GPT-4o
+        # Use the encode_plus method to get token offsets
+        encoded_output = self.tokenizer.encode_plus(
+            text,
+            return_offsets_mapping=True,  # To get the offsets
+            add_special_tokens=False  # Avoid adding special tokens like BOS/EOS in this method
+        )
+        
+        # Extract the offsets (a list of tuples with start and end positions)
+        offsets = encoded_output["offsets_mapping"]
+        
+        # Extract the tokenized substrings
+        substrs = [text[start:end] for start, end in offsets]
+
+        # Extract the starting positions from the offset tuples
+        start_offsets = [start for start, _ in offsets]
+
+        return substrs, start_offsets
 
 class ByteTokenizer(Tokenizer):
     def __init__(self):
