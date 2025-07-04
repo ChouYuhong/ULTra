@@ -18,7 +18,7 @@ from omegaconf import OmegaConf
 import torch
 import torch.distributed
 import torch.nn.functional as F
-import xformers.profiler
+# import xformers.profiler
 from torch.optim import lr_scheduler
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed._tensor import DTensor
@@ -311,19 +311,6 @@ def train(args: TrainArgs):
         checkpoint = CheckpointManager.instantiate_and_make_dir(args.checkpoint)
         checkpoint.load(model, optimizer, train_state, world_mesh)
         # Either load from latest checkpoint or start from scratch
-        if args.probe_freq is not None:
-            if get_is_master():
-                os.makedirs(Path(args.dump_dir) / "probe", exist_ok=True)
-            torch.distributed.barrier()
-            probe = AutoProbeD(
-                model,
-                (
-                    Path(args.dump_dir) / "probe" / f"probe.{dp_rank}.jsonl"
-                    if (dp_rank % 128 == 0)
-                    else None
-                ),
-            )
-
         gc.disable()
 
         # train loop
@@ -336,9 +323,6 @@ def train(args: TrainArgs):
                 args.data,
                 state=train_state.data_loader_state,
             )
-        )
-        torch_profiler = context_stack.enter_context(
-            maybe_run_profiler(args.dump_dir, model, args.profiling)
         )
 
         nwords_since_last_log = 0
@@ -375,42 +359,6 @@ def train(args: TrainArgs):
             start_timer = torch.cuda.Event(enable_timing=True)
             end_timer = torch.cuda.Event(enable_timing=True)
             start_timer.record()
-
-            # This is an automatic probe that will compute statistics
-            # of all linears' inputs, weights and outputs
-            # along with attention logits and entropy
-            # both in forward and backward pass
-            if (args.probe_freq is not None) and every_n_steps(
-                train_state, args.probe_freq, acc_step=1 % args.grad_acc_steps
-            ):
-                # Here we do a fake forward and backward pass on a smaller
-                # batch size to avoid OOM
-                # This assumes the model has no stateful layers (batch norm..)
-                assert (
-                    next(model.parameters()).grad is None
-                ), "Can't probe model if grads are not reset"
-
-                with probe:
-                    probe.metadata = {
-                        "it": train_state.step,
-                        "global_step": train_state.step,
-                        "loop": "lingua",
-                    }
-                    # Non compiled model uses roughly 2x memory in our exps
-                    # So we divide bsz by 2 or seqlen by 2
-                    probe_bsz = max(1, bsz // 2)
-                    probe_seq = seqlen if (bsz // 2 >= 1) else (seqlen // 2)
-                    probe_loss = model(
-                        input_ids[:probe_bsz, :probe_seq],
-                        labels[:probe_bsz, :probe_seq],
-                    )
-                    probe_loss.backward()
-                    # We zero grads to cancel this fake step
-                    optimizer.zero_grad()
-
-                assert (
-                    next(model.parameters()).grad is None
-                ), "Probe model shouldn't have grads at this point"
 
             loss = model(input_ids, labels)
 
@@ -450,8 +398,8 @@ def train(args: TrainArgs):
             curr_iter_time = round(start_timer.elapsed_time(end_timer) * 1e-3, 4)
 
             # if profiler is active
-            if torch_profiler:
-                xformers.profiler.step()
+            # if torch_profiler:
+            #     xformers.profiler.step()
 
             # log metrics
             if every_n_steps(
@@ -539,57 +487,6 @@ def train(args: TrainArgs):
                     args,
                     device_mesh=world_mesh,
                 )
-
-            if args.eval is not None and (every_n_steps(
-                train_state, args.checkpoint.eval.every, acc_step=0
-            ) or every_n_steps(train_state, args.steps, acc_step=0)):
-                from apps.main.eval import (
-                    launch_eval,
-                    EVAL_FOLDER_NAME,
-                    EvalArgs,
-                )
-
-                eval_args = dataclass_from_dict(EvalArgs, args.eval)
-
-                eval_args.global_step = train_state.step
-                eval_args.ckpt_dir = str(checkpoint.existing_saves[-1])
-                eval_args.dump_dir = str(
-                    os.path.join(
-                        args.dump_dir,
-                        "evals",
-                        EVAL_FOLDER_NAME.format(train_state.step),
-                    )
-                )
-                eval_args.metric_log_dir = args.dump_dir
-                if args.async_eval_gpus is None:
-                    launch_eval(eval_args)
-                elif get_is_master():
-                    if wandb.run is not None and args.logging.wandb is not None:
-                        eval_args.wandb = deepcopy(args.logging.wandb)
-                    assert args.async_eval_gpus > 0
-                    logger.info(f"Launching evals on {args.async_eval_gpus} gpus")
-                    with clean_env():
-                        launch_job(
-                            StoolArgs(
-                                asdict(eval_args),
-                                script="apps.main.eval",
-                                copy_code=False,
-                                nodes=args.async_eval_gpus // 8,
-                                qos="lowest",
-                            )
-                        )
-
-            if preemption_flag["flag"]:
-                if not saved:
-                    checkpoint.save(
-                        model,
-                        optimizer,
-                        train_state,
-                        args,
-                        device_mesh=world_mesh,
-                    )
-                requeue_slurm_job()
-                sys.exit(0)
 
     if not saved:
         checkpoint.save(
