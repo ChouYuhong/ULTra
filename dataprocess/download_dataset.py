@@ -7,6 +7,7 @@ def main():
     args = parser.parse_args()
 
     dataset = load_dataset(
+    dataset = load_dataset(
         args.repo_name,
         split="train",
         keep_in_memory=False,
