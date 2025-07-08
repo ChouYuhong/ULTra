@@ -54,19 +54,13 @@ from lingua.metrics import (
     get_num_params,
 )
 from lingua.optim import OptimArgs, build_optimizer
-from lingua.profiling import ProfilerArgs, maybe_run_profiler
 from lingua.tokenizer import build_tokenizer
-from apps.main.transformer import (
-    LMTransformerArgs,
-    LMTransformer,
-    get_num_flop_per_token,
-    build_fsdp_grouping_plan,
-    tp_parallelize,
-    get_no_recompute_ops,
-)
 from lingua.model import (
+    LMTransformerArgs,
     reinit_weights,
     load_model_from_config,
+    get_num_flop_per_token,
+    build_fsdp_grouping_plan,
 )
 
 import wandb
@@ -86,7 +80,7 @@ class TrainArgs:
     grad_acc_steps: int = 1
 
     gc_collect_freq: int = 1000
-    probe_freq: Optional[int] = None
+    # probe_freq: Optional[int] = None
 
     # Nb optimizer steps to take
     steps: int = 1000
@@ -183,23 +177,23 @@ def validate_train_args(args: TrainArgs, output_size: int):
             "Tensor parallelism has not been tested for a while, use at your own risk"
         )
 
-    assert (
-        args.probe_freq != args.profiling.mem_steps
-    ), "Don't profile during probe step"
-    assert (
-        args.probe_freq != args.profiling.profile_steps
-    ), "Don't profile during probe step"
+    # assert (
+    #     args.probe_freq != args.profiling.mem_steps
+    # ), "Don't profile during probe step"
+    # assert (
+    #     args.probe_freq != args.profiling.profile_steps
+    # ), "Don't profile during probe step"
 
     if args.logging.wandb is not None:
         args.logging.wandb.name = args.name
 
-    if args.probe_freq is not None:
-        assert (
-            args.distributed.tp_size == 1
-        ), "Probing not supported with tensor parallelism"
-        assert (
-            args.distributed.selective_activation_checkpointing is False
-        ), "Probing not supported with selective activation checkpointing"
+    # if args.probe_freq is not None:
+    #     assert (
+    #         args.distributed.tp_size == 1
+    #     ), "Probing not supported with tensor parallelism"
+    #     assert (
+    #         args.distributed.selective_activation_checkpointing is False
+    #     ), "Probing not supported with selective activation checkpointing"
 
 
 preemption_flag = dict(flag=False)
@@ -254,7 +248,7 @@ def train(args: TrainArgs):
 
         # Initializing Model in meta device allows us to initialize models much bigger than 1 gpu's memory
         with torch.device("meta"):
-            model = LMTransformer(args.model)
+            model = load_model_from_config(args.model)
         logger.info("Model is built !")
 
         model_param_count = get_num_params(model)
@@ -265,8 +259,8 @@ def train(args: TrainArgs):
             args.model,
             args.distributed,
             fsdp_grouping_plan=build_fsdp_grouping_plan(args.model),
-            tp_parallelize=tp_parallelize,
-            no_recompute_ops=get_no_recompute_ops(),
+            tp_parallelize=None,
+            no_recompute_ops=None,
         )
 
         # Once we shard the model on different gpus we can actually initialize the model
@@ -363,7 +357,8 @@ def train(args: TrainArgs):
             end_timer = torch.cuda.Event(enable_timing=True)
             start_timer.record()
 
-            loss = model(input_ids, labels)
+            output = model(input_ids, labels)
+            loss = output.loss
 
             if args.grad_acc_steps > 1:
                 model.set_requires_gradient_sync(train_state.acc_step == 0)
