@@ -92,7 +92,7 @@ class TrainArgs:
     env: EnvironmentArgs = field(default_factory=EnvironmentArgs)
 
     checkpoint: CheckpointArgs = field(default_factory=CheckpointArgs)
-    profiling: ProfilerArgs = field(default_factory=ProfilerArgs)
+    # profiling: ProfilerArgs = field(default_factory=ProfilerArgs)
     logging: LoggingArgs = field(default_factory=LoggingArgs)
 
     # If set to None, eval is run locally otherwise it launches a new job with the given number of gpus
