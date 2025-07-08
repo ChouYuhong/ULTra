@@ -18,7 +18,7 @@ class LinguaEvalWrapper(HFLM):
     def __init__(self, pretrained="state-spaces/mamba-2.8b", max_length=2048, batch_size=None, device="cuda",
                  dtype=torch.float16):
         LM.__init__(self)
-        self._model = MambaLMHeadModel.from_pretrained(pretrained, device=device, dtype=dtype)
+        # self._model = MambaLMHeadModel.from_pretrained(pretrained, device=device, dtype=dtype)
         self.tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         self.vocab_size = self.tokenizer.vocab_size

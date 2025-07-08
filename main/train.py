@@ -338,6 +338,7 @@ def train(args: TrainArgs):
             # get batch
             curr_lr = float(optimizer.param_groups[0]["lr"])
             data_load_start = timer()
+            # NOTE here should be skip for sequence parallelism
             batch, train_state.data_loader_state = next(data_loader)
             batch = torch.tensor(
                 batch,
