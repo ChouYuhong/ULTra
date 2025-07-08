@@ -43,6 +43,8 @@ def main():
     import pdb
     pdb.set_trace()
     merged_dataset = concatenate_datasets(datasets_list)
+    # shuffled = merged_dataset.shuffle(seed=42)
+    # shuffled.save_to_disk(output_file, num_proc=64)
     merged_dataset.to_json(output_file, num_proc=40, orient="records", lines=True, force_ascii=False)
     print(f"Merging complete. Total {len(merged_dataset)} entries written to {output_file}")
 
