@@ -56,7 +56,7 @@ from lingua.metrics import (
 from lingua.optim import OptimArgs, build_optimizer
 from lingua.tokenizer import build_tokenizer
 from lingua.model import (
-    LMTransformerArgs,
+    BaseTransformerArgs,
     reinit_weights,
     load_model_from_config,
     get_num_flop_per_token,
@@ -87,7 +87,7 @@ class TrainArgs:
 
     data: DataArgs = field(default_factory=DataArgs)
     optim: OptimArgs = field(default_factory=OptimArgs)
-    model: LMTransformerArgs = field(default_factory=LMTransformerArgs)
+    model: BaseTransformerArgs = field(default_factory=BaseTransformerArgs)
     distributed: DistributedArgs = field(default_factory=DistributedArgs)
     env: EnvironmentArgs = field(default_factory=EnvironmentArgs)
 

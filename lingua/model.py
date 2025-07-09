@@ -1,9 +1,11 @@
-from typing import Optional, Union, Tuple
+from typing import Optional, Union, Literal
 from dataclasses import dataclass
 
 
 @dataclass
 class BaseTransformerArgs:
+
+    name_type: Literal["backbone", "model"]
     dim: int = 512
     n_layers: int = 8
     head_dim: Optional[int] = None
@@ -23,30 +25,29 @@ class BaseTransformerArgs:
 
     max_seqlen: int = 1024
 
-@dataclass
-class LMTransformerArgs(BaseTransformerArgs):
-
-    seed: int = 42
-
-    vocab_size: int = -1
-    weight_tying: bool = False
-
-    sliding_window: Optional[int] = None
-
 # Optional and only used for fully shard options (fsdp) is choose. Highly recommanded for large models
-def build_fsdp_grouping_plan(model_args: LMTransformerArgs):
+def build_fsdp_grouping_plan(model_args: BaseTransformerArgs):
     group_plan: Tuple[int, bool] = []
 
-    # Grouping and output seperately
-    group_plan.append(("tok_embeddings", False))
+    if model_args.name_type == "model"
+        # Grouping and output seperately
+        group_plan.append(("model.embeddings", False))
 
-    # Grouping by layers
-    for i in range(model_args.n_layers):
-        group_plan.append((f"layers.{i}", False))
+        # Grouping by layers
+        for i in range(model_args.n_layers):
+            group_plan.append((f"model.layers.{i}", False))
+    elif model_args.name_type == "backbone":
+        # Grouping and output seperately
+        group_plan.append(("backbone.embeddings", False))
 
-    group_plan.append(("output", True))
+        # Grouping by layers
+        for i in range(model_args.n_layers):
+            group_plan.append((f"backbone.layers.{i}", False))
+
+    group_plan.append(("lm_head", False))
 
     return group_plan
+
 
 def get_num_flop_per_token(
     num_non_embed_params: int, n_layers: int, dim: int, seq_len: int
@@ -87,3 +88,50 @@ def load_model_from_config(model_name, config_file):
     else:
         raise ValueError(f"Unknown model name: {model_name}")
     return model
+
+def load_model_from_path(model_name, path):
+    if model_name == "transformer":
+        from fla.models import TransformerForCausalLM
+        model = TransformerForCausalLM.from_pretrained(path)
+    elif model_name == "gla":
+        from fla.models import GLAForCausalLM
+        model = GLAForCausalLM.from_pretrained(path)
+    elif model_name == "hgrn2":
+        from fla.models import HGRN2ForCausalLM
+        model = HGRN2ForCausalLM.from_pretrained(path)
+    elif model_name == "mamba":
+        from fla.models import MambaForCausalLM
+        model = MambaForCausalLM.from_pretrained(path)
+    elif model_name == "mamba2":
+        from fla.models import Mamba2ForCausalLM
+        model = Mamba2ForCausalLM.from_pretrained(path)
+    elif model_name == "gdn":
+        from fla.models import GatedDeltaNetForCausalLM
+        model = GatedDeltaNetForCausalLM.from_pretrained(path)
+    else:
+        raise ValueError(f"Unknown model name: {model_name}")
+    return model
+
+
+def load_config_from_path(model_name, path):
+    if model_name == "transformer":
+        from fla.models import TransformerConfig
+        config = TransformerConfig.from_pretrained(path)
+    elif model_name == "gla":
+        from fla.models import GLAConfig
+        config = GLAConfig.from_pretrained(path)
+    elif model_name == "hgrn2":
+        from fla.models import HGRN2Config
+        config = HGRN2Config.from_pretrained(path)
+    elif model_name == "mamba":
+        from fla.models import MambaConfig
+        config = MambaConfig.from_pretrained(path)
+    elif model_name == "mamba2":
+        from fla.models import Mamba2Config
+        config = Mamba2Config.from_pretrained(path)
+    elif model_name == "gdn":
+        from fla.models import GatedDeltaNetConfig
+        config = GatedDeltaNetConfig.from_pretrained(path)
+    else:
+        raise ValueError(f"Unknown model name: {model_name}")
+    return config
