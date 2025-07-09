@@ -574,47 +574,50 @@ def distribute_data_to_rank(dataset_path: str, rank: int, world_size: int, file_
     Otherwise, world_size is assumed to be a multiple of number of chunks.
     In that case there are world_size//nb_chunks workers on each chunk file, reading with different offsets.
     """
-    # dataset_chunks = find_and_sanitize_chunks(dataset_path, world_size, file_pattern)
-    # n_ranks_per_chunk = world_size // len(dataset_chunks)
-    # rank_to_jsonl_iterator_params = []
-    # for chunk_path in dataset_chunks:
-    #     for i in range(n_ranks_per_chunk):
-    #         rank_to_jsonl_iterator_params.append(
-    #             JSONLState(
-    #                 file_path=chunk_path,
-    #                 position=0,
-    #                 block_size=n_ranks_per_chunk,
-    #                 offset=i,
-    #                 current_iter=0,
-    #             )
-    #         )
+    
 
     # return rank_to_jsonl_iterator_params[rank]
     def parse_dataset_path(dataset_path):
         """
-        Given a string in the format "load_type:chunk_path",
-        returns (load_type, chunk_path).
+        Given a string in the format "load_type:data_path",
+        returns (load_type, data_path).
         """
         parts = dataset_path.split(":", 1)
         if len(parts) != 2:
             raise ValueError(f"Invalid dataset_path format: {dataset_path}")
-        load_type, chunk_path = parts
-        return load_type, chunk_path
-    
-    n_ranks_per_chunk = world_size
-    rank_to_jsonl_iterator_params = []
-    load_type, chunk_path = parse_dataset_path(dataset_path)
-    for i in range(n_ranks_per_chunk):
-        rank_to_jsonl_iterator_params.append(
-            JSONLState(
-                file_path=chunk_path,
-                position=0,
-                block_size=n_ranks_per_chunk,
-                offset=i,
-                current_iter=0,
-                load_type=load_type
+        load_type, data_path = parts
+        return load_type, data_path
+    load_type, data_path = parse_dataset_path(dataset_path)
+    if load_type is not "jsonl":
+        n_ranks_per_chunk = world_size
+        rank_to_jsonl_iterator_params = []
+        
+        for i in range(n_ranks_per_chunk):
+            rank_to_jsonl_iterator_params.append(
+                JSONLState(
+                    file_path=data_path,
+                    position=0,
+                    block_size=n_ranks_per_chunk,
+                    offset=i,
+                    current_iter=0,
+                    load_type=load_type
+                )
             )
-        )
+    else:
+        dataset_chunks = find_and_sanitize_chunks(data_path, world_size, file_pattern)
+        n_ranks_per_chunk = world_size // len(dataset_chunks)
+        rank_to_jsonl_iterator_params = []
+        for chunk_path in dataset_chunks:
+            for i in range(n_ranks_per_chunk):
+                rank_to_jsonl_iterator_params.append(
+                    JSONLState(
+                        file_path=chunk_path,
+                        position=0,
+                        block_size=n_ranks_per_chunk,
+                        offset=i,
+                        current_iter=0,
+                    )
+                )
 
     return rank_to_jsonl_iterator_params[rank]
 
