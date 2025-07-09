@@ -29,7 +29,7 @@ class BaseTransformerArgs:
 def build_fsdp_grouping_plan(model_args: BaseTransformerArgs):
     group_plan: Tuple[int, bool] = []
 
-    if model_args.name_type == "model"
+    if model_args.name_type == "model":
         # Grouping and output seperately
         group_plan.append(("model.embeddings", False))
 
