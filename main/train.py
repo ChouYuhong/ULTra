@@ -239,9 +239,21 @@ def train(args: TrainArgs):
         if args.distributed.dp_shard > 1:
             dp_rank = dp_rank * world_mesh["dp_shard"].size() + world_mesh["dp_shard"].get_local_rank()
             dp_degree *= world_mesh["dp_shard"].size()
+        sp_mesh = world_mesh["sp_replicate"]
+        sp_degree = sp_mesh.size()
+        sp_rank = sp_mesh.get_local_rank()
+        if args.distributed.sp_shard > 1:
+            sp_rank = sp_rank * world_mesh["sp_shard"].size() + world_mesh["sp_shard"].get_local_rank()
+            sp_degree *= world_mesh["sp_shard"].size()
+        dp_group = world_mesh["dp"].get_group()
+        assert dp_rank == dist.get_rank(group=dp_group)
+        sp_group = world_mesh["sp"].get_group()
+        assert sp_rank == dist.get_rank(group=sp_group)
 
         logger.info(f"Running on dp rank : {dp_rank}")
         logger.info(f"Running on dp size : {dp_degree}")
+        logger.info(f"Running on sp rank : {sp_rank}")
+        logger.info(f"Running on sp size : {sp_degree}")
 
         torch.manual_seed(args.seed)
         logger.info("Building model")
@@ -262,6 +274,8 @@ def train(args: TrainArgs):
             tp_parallelize=None,
             no_recompute_ops=None,
         )
+        if args.distributed.activation_checkpointing:
+            model.gradient_checkpointing_enable()
 
         # Once we shard the model on different gpus we can actually initialize the model
         # First we create empty tensors of the correct shapes
