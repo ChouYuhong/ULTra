@@ -19,7 +19,6 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 from torch.distributed import ReduceOp
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch import distributed as dist
 from torch.distributed._tensor import DTensor
 from torch.distributed._composable.fsdp import MixedPrecisionPolicy, fully_shard
@@ -33,7 +32,7 @@ from torch.utils.checkpoint import (
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 # for no recompute ops
-import xformers.ops
+# import xformers.ops
 
 from lingua.float8 import convert_linears_to_fp8
 
@@ -103,7 +102,7 @@ def get_device_mesh(distributed_args: DistributedArgs):
 
     assert tp_size == 1, "we currently do not support tp"
 
-     assert (
+    assert (
         dp_shard * dp_replicate * sp_shard * sp_replicate == get_world_size()
     ), f"dp_shard * dp_replicate * dp_shard * tp_size ({dp_shard} * {dp_replicate} * {sp_shard} * {sp_replicate}) != world_size ({get_world_size()})"
 
