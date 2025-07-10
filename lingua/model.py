@@ -1,4 +1,4 @@
-from typing import Optional, Union, Literal
+from typing import Optional, Tuple, Literal
 from dataclasses import dataclass
 
 
@@ -6,6 +6,7 @@ from dataclasses import dataclass
 class BaseTransformerArgs:
 
     name_type: Literal["backbone", "model"]
+    config_path: str = ""
     dim: int = 512
     n_layers: int = 8
     head_dim: Optional[int] = None
@@ -67,6 +68,18 @@ def reinit_weights(model):
         if hasattr(module, '_is_hf_initialized'):
             module._is_hf_initialized = False
     model.init_weights()
+
+def reset_rope_cache(model) -> None:
+    """
+    Reset parameters for all modules named 'RotaryEmbedding'.
+    
+    Args:
+        model: PyTorch model to traverse
+    """
+    from fla.modules.rotary import RotaryEmbedding
+    for name, module in model.named_modules():
+        if isinstance(module, RotaryEmbedding):
+            module.reset_parameters()
 
 def load_model_from_config(model_name, config_file):
     if model_name == "transformer":
