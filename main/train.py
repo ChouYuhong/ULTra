@@ -18,7 +18,7 @@ from omegaconf import OmegaConf
 import torch
 import torch.distributed
 import torch.nn.functional as F
-# import xformers.profiler
+from torch import distributed as dist
 from torch.optim import lr_scheduler
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed._tensor import DTensor
@@ -58,6 +58,7 @@ from lingua.tokenizer import build_tokenizer
 from lingua.model import (
     BaseTransformerArgs,
     reinit_weights,
+    reset_rope_cache,
     load_model_from_config,
     get_num_flop_per_token,
     build_fsdp_grouping_plan,
@@ -239,16 +240,28 @@ def train(args: TrainArgs):
         if args.distributed.dp_shard > 1:
             dp_rank = dp_rank * world_mesh["dp_shard"].size() + world_mesh["dp_shard"].get_local_rank()
             dp_degree *= world_mesh["dp_shard"].size()
+        sp_mesh = world_mesh["sp_replicate"]
+        sp_degree = sp_mesh.size()
+        sp_rank = sp_mesh.get_local_rank()
+        if args.distributed.sp_shard > 1:
+            sp_rank = sp_rank * world_mesh["sp_shard"].size() + world_mesh["sp_shard"].get_local_rank()
+            sp_degree *= world_mesh["sp_shard"].size()
+        dp_group = world_mesh["dp"].get_group()
+        assert dp_rank == dist.get_rank(group=dp_group)
+        sp_group = world_mesh["sp"].get_group()
+        assert sp_rank == dist.get_rank(group=sp_group)
 
         logger.info(f"Running on dp rank : {dp_rank}")
         logger.info(f"Running on dp size : {dp_degree}")
+        logger.info(f"Running on sp rank : {sp_rank}")
+        logger.info(f"Running on sp size : {sp_degree}")
 
         torch.manual_seed(args.seed)
         logger.info("Building model")
 
         # Initializing Model in meta device allows us to initialize models much bigger than 1 gpu's memory
         with torch.device("meta"):
-            model = load_model_from_config(args.model)
+            model = load_model_from_config(args.model.name_type, args.model.config_path)
         logger.info("Model is built !")
 
         model_param_count = get_num_params(model)
@@ -262,6 +275,8 @@ def train(args: TrainArgs):
             tp_parallelize=None,
             no_recompute_ops=None,
         )
+        if args.distributed.activation_checkpointing:
+            model.gradient_checkpointing_enable()
 
         # Once we shard the model on different gpus we can actually initialize the model
         # First we create empty tensors of the correct shapes
@@ -270,14 +285,15 @@ def train(args: TrainArgs):
         # and buffers, otherwise you will have random values in the unitialized tensors
         # which will silently fail (give nan gradients for example)
 
+        # NOTE the key point here is that we need to find a distributed checkpoint loading
         if args.checkpoint.init_ckpt_path:
             logger.info(f"Loading initial model from {args.checkpoint.init_ckpt_path}")
             load_from_checkpoint(args.checkpoint.init_ckpt_path, model, model_key="model") # Put model_key="" if its directly the model checkpoint
-            model.rope_embeddings.reset_parameters() # For RoPe initialization since it's a buffer it might not be loaded
+            reset_rope_cache(model) # For RoPe initialization since it's a buffer it might not be loaded
         else:
             with torch.random.fork_rng(devices=[torch.cuda.current_device()]):
                 torch.manual_seed(args.model.seed)
-                model.init_weights()
+                reinit_weights(model)
         check_model_value_range(model, range=10.0, std=1.0)
 
         # log model size
@@ -345,8 +361,9 @@ def train(args: TrainArgs):
                 # run the GC at different times so they slow down the whole pipeline
                 gc.collect()
 
-            input_ids = batch[:, :, 0].cuda()
-            labels = batch[:, :, 1].cuda()
+            input_ids = batch[:, :].cuda()
+            labels = input_ids
+            # labels = batch[:, :, 1].cuda()
             data_load_time = round(timer() - data_load_start, 4)
             nwords_since_last_log += input_ids.numel()
 

@@ -257,6 +257,7 @@ def loop_on_jsonl(
     load_type: str
 ):
     """Makes the block jsonl iterator infinite and updates n_iter counter"""
+    assert load_type == "josnl", "load_type must be 'jsonl'"
     try:
         while True:
             it = read_jsonl(file_path, position, block_size, offset, current_iter, load_type=load_type)
@@ -280,6 +281,8 @@ def loop_on_hf_dataset(
         dataset = load_dataset(file_path, split="train", keep_in_memory=False, num_proc=16)
     elif load_type == "load_from_disk":
         dataset = load_from_disk(file_path)
+    else:
+        raise NotImplementedError(f"load_type {load_type} not implemented")
     try:
         while True:
             it = read_hf_dataset(dataset, file_path, position, block_size, offset, current_iter, load_type)
@@ -701,22 +704,25 @@ def setup_sources(multi_state):
     path_to_iter = dict()
     for source in multi_state["sources"]:
         jsonl_state = multi_state["source_to_state"][source]
-        # path_to_iter[source] = loop_on_jsonl(
-        #     jsonl_state["file_path"],
-        #     jsonl_state["position"],
-        #     jsonl_state["block_size"],
-        #     jsonl_state["offset"],
-        #     jsonl_state["current_iter"],
-        #     jsonl_state["load_type"]
-        # )
-        path_to_iter[source] = loop_on_hf_dataset(
-            jsonl_state["file_path"],
-            jsonl_state["position"],
-            jsonl_state["block_size"],
-            jsonl_state["offset"],
-            jsonl_state["current_iter"],
-            jsonl_state["load_type"]
-        )
+
+        if jsonl_state["load_type"] is "jsonl":
+            path_to_iter[source] = loop_on_jsonl(
+                jsonl_state["file_path"],
+                jsonl_state["position"],
+                jsonl_state["block_size"],
+                jsonl_state["offset"],
+                jsonl_state["current_iter"],
+                jsonl_state["load_type"]
+            )
+        else:
+            path_to_iter[source] = loop_on_hf_dataset(
+                jsonl_state["file_path"],
+                jsonl_state["position"],
+                jsonl_state["block_size"],
+                jsonl_state["offset"],
+                jsonl_state["current_iter"],
+                jsonl_state["load_type"]
+            )
 
     return path_to_iter
 

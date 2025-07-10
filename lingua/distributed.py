@@ -19,7 +19,6 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 from torch.distributed import ReduceOp
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch import distributed as dist
 from torch.distributed._tensor import DTensor
 from torch.distributed._composable.fsdp import MixedPrecisionPolicy, fully_shard
@@ -33,7 +32,7 @@ from torch.utils.checkpoint import (
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 # for no recompute ops
-import xformers.ops
+# import xformers.ops
 
 from lingua.float8 import convert_linears_to_fp8
 
@@ -55,14 +54,14 @@ with contextlib.suppress(AttributeError):  # ignore exception if op is missing (
 
 @dataclass
 class DistributedArgs:
-    dp_shard: int = (
-        1  # In how many shard to split the model weight. Typically number gpu in a node.
-    )
-    dp_replicate: int = (
-        1  # How many times to replicate the model weight. Typically number of nodes.
-    )
+    dp_shard: int = 1
+    dp_replicate: int = 1  
+    sp_shard: int = 1
+    sp_replicate: int = 1
     tp_size: int = 1
-    selective_activation_checkpointing: bool = False
+
+    activation_checkpointing: bool = False
+    # selective_activation_checkpointing: bool = False
     compile: bool = False
     fsdp_type: str = "no_shard"
     model_dtype: str = "bf16"
@@ -97,27 +96,49 @@ class EnvironmentArgs:
 def get_device_mesh(distributed_args: DistributedArgs):
     tp_size = distributed_args.tp_size
     dp_replicate = distributed_args.dp_replicate
+    sp_replicate = distributed_args.sp_replicate
     dp_shard = distributed_args.dp_shard
+    sp_shard = distributed_args.sp_shard
+
+    assert tp_size == 1, "we currently do not support tp"
 
     assert (
-        dp_replicate * dp_shard * tp_size == get_world_size()
-    ), f"dp_replicate * dp_shard * tp_size ({dp_replicate} * {dp_shard} * {tp_size}) != world_size ({get_world_size()})"
+        dp_shard * dp_replicate * sp_shard * sp_replicate == get_world_size()
+    ), f"dp_shard * dp_replicate * dp_shard * tp_size ({dp_shard} * {dp_replicate} * {sp_shard} * {sp_replicate}) != world_size ({get_world_size()})"
 
     dims = []
     names = []
+    # NOTE here we make the sp dim as right as possible
+    # NOTE make them physically close
     if dp_replicate >= 1:
         dims.append(dp_replicate)
         names.append("dp_replicate")
-    if dp_shard > 1 or distributed_args.fsdp_type == "no_shard":
+    if dp_shard >= 1 or distributed_args.fsdp_type == "no_shard":
         dims.append(dp_shard)
         names.append("dp_shard")
     if tp_size > 1:
         dims.append(tp_size)
         names.append("tp")
+    if sp_replicate >= 1:
+        dims.append(sp_replicate)
+        names.append("sp_replicate")
+    if sp_shard >= 1 or distributed_args.fsdp_type == "no_shard":
+        dims.append(sp_shard)
+        names.append("sp_shard")
+    
     dims = tuple(dims)
     names = tuple(names)
 
-    return init_device_mesh("cuda", mesh_shape=dims, mesh_dim_names=names)
+    device_mesh = init_device_mesh("cuda", mesh_shape=dims, mesh_dim_names=names)
+
+    # NOTE prepare fsdp mesh
+    device_mesh[tuple(["dp_replicate", "sp_replicate"])]._flatten(mesh_dim_name="replicate")
+    device_mesh[tuple(["dp_shard", "sp_shard"])]._flatten(mesh_dim_name="shard")
+    # NOTE prepare dp, sp mesh
+    device_mesh[tuple(["dp_replicate", "dp_shard"])]._flatten(mesh_dim_name="dp")
+    device_mesh[tuple(["sp_replicate", "sp_shard"])]._flatten(mesh_dim_name="sp")
+
+    return device_mesh
 
 
 def dist_max(x: Union[int, float], mesh: DeviceMesh = None):
@@ -400,11 +421,13 @@ def parallelize_model(
     tp_parallelize=None,
     no_recompute_ops=None,
 ):
+    # NOTE the fp8 method is tobe verified
     if distributed_args.float8_recipe is not None:
         model = convert_linears_to_fp8(
             model, distributed_args.float8_recipe, distributed_args.float8_filter
         )
 
+    # NOTE process tp parallelism, currently we dont use it since we assert tp_size == 1
     if distributed_args.tp_size > 1:
         assert (
             distributed_args.fsdp_type == "full_shard"
@@ -430,6 +453,12 @@ def parallelize_model(
             assert (
                 device_mesh["dp_shard"].size() == 1
             ), "dp_shard must be 1 for no_shard fsdp_type"
+            assert (
+                distributed_args.sp_shard == 1
+            ), "dp_shard must be 1 for no_shard fsdp_type"
+            assert (
+                device_mesh["sp_shard"].size() == 1
+            ), "dp_shard must be 1 for no_shard fsdp_type"
 
         fsdp_config = dict(
             mp_policy=(
@@ -439,16 +468,19 @@ def parallelize_model(
                 )
             ),
             mesh=(
-                device_mesh["dp_replicate", "dp_shard"]
-                if distributed_args.dp_shard > 1
+                device_mesh["replicate", "shard"]
+                if distributed_args.dp_shard * distributed_args.sp_shard > 1
                 or distributed_args.fsdp_type == "no_shard"
-                else device_mesh["dp_replicate"]
+                else device_mesh["replicate"]
             ),
         )
 
-        if fsdp_grouping_plan is None:
-            # Assume that the model has list of layers and group around it
-            fsdp_grouping_plan = default_fsdp_grouping_plan(len(model.layers))
+        # NOTE assert we have already get fsdp plan
+
+        # if fsdp_grouping_plan is None:
+        #     # Assume that the model has list of layers and group around it
+        #     fsdp_grouping_plan = default_fsdp_grouping_plan(len(model.layers))
+        assert fsdp_grouping_plan is not None, "fsdp_grouping_plan is required"
 
         for path, reshard_after_forward in fsdp_grouping_plan:
             module = get_module(model, path)
@@ -460,23 +492,26 @@ def parallelize_model(
                 ),
             )
 
-        model = fully_shard(model, **fsdp_config, reshard_after_forward=True)
+        model = fully_shard(model, **fsdp_config, reshard_after_forward=False)
     else:
         raise ValueError(f"Invalid fsdp_type: {distributed_args.fsdp_type}")
 
-    if distributed_args.selective_activation_checkpointing:
-        model = checkpoint_wrapper(
-            model,
-            context_fn=partial(
-                create_selective_checkpoint_contexts,
-                get_default_policy(no_recompute_ops),
-            ),
-        )
+    # NOTE we open activation checkpointing right after fsdp
+    # if distributed_args.selective_activation_checkpointing:
+    #     model = checkpoint_wrapper(
+    #         model,
+    #         context_fn=partial(
+    #             create_selective_checkpoint_contexts,
+    #             get_default_policy(no_recompute_ops),
+    #         ),
+    #     )
 
-    if distributed_args.compile:
-        torch._dynamo.config.cache_size_limit = (
-            distributed_args.compile_cache_size_limit
-        )
-        model.compile()
+    # NOTE we do not rely on compile
+    assert distributed_args.compile == False, "Compile is not supported"
+    # if distributed_args.compile:
+    #     torch._dynamo.config.cache_size_limit = (
+    #         distributed_args.compile_cache_size_limit
+    #     )
+    #     model.compile()
 
     return model

@@ -1,4 +1,4 @@
-from typing import Optional, Union, Literal
+from typing import Optional, Tuple, Literal
 from dataclasses import dataclass
 
 
@@ -6,6 +6,7 @@ from dataclasses import dataclass
 class BaseTransformerArgs:
 
     name_type: Literal["backbone", "model"]
+    config_path: str = ""
     dim: int = 512
     n_layers: int = 8
     head_dim: Optional[int] = None
@@ -29,22 +30,24 @@ class BaseTransformerArgs:
 def build_fsdp_grouping_plan(model_args: BaseTransformerArgs):
     group_plan: Tuple[int, bool] = []
 
-    if model_args.name_type == "model"
+    if model_args.name_type == "model":
         # Grouping and output seperately
-        group_plan.append(("model.embeddings", False))
+        group_plan.append(("model.embeddings", True))
 
         # Grouping by layers
         for i in range(model_args.n_layers):
-            group_plan.append((f"model.layers.{i}", False))
+            group_plan.append((f"model.layers.{i}", True))
     elif model_args.name_type == "backbone":
         # Grouping and output seperately
-        group_plan.append(("backbone.embeddings", False))
+        group_plan.append(("backbone.embeddings", True))
 
         # Grouping by layers
         for i in range(model_args.n_layers):
-            group_plan.append((f"backbone.layers.{i}", False))
+            group_plan.append((f"backbone.layers.{i}", True))
 
-    group_plan.append(("lm_head", False))
+    # NOTE here is a dangerous that the lm_head's forward function is not called
+    # So I choose no fsdp for the output linear layer, at most cost about 2GB for 32k vocabulary
+    # group_plan.append(("lm_head", False))
 
     return group_plan
 
@@ -65,6 +68,18 @@ def reinit_weights(model):
         if hasattr(module, '_is_hf_initialized'):
             module._is_hf_initialized = False
     model.init_weights()
+
+def reset_rope_cache(model) -> None:
+    """
+    Reset parameters for all modules named 'RotaryEmbedding'.
+    
+    Args:
+        model: PyTorch model to traverse
+    """
+    from fla.modules.rotary import RotaryEmbedding
+    for name, module in model.named_modules():
+        if isinstance(module, RotaryEmbedding):
+            module.reset_parameters()
 
 def load_model_from_config(model_name, config_file):
     if model_name == "transformer":
