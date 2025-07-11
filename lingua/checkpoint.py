@@ -104,7 +104,7 @@ class CheckpointManager:
     def __init__(self, args: CheckpointArgs):
         self.path = args.path
         self.dump_every = args.dump
-        self.eval_every = args.eval
+        # self.eval_every = args.eval
         self.init_ckpt_path = args.init_ckpt_path
         self.continue_training_from_init = args.continue_training_from_init
 

@@ -45,6 +45,7 @@ from lingua.distributed import (
     clean_env,
     requeue_slurm_job,
     check_model_value_range,
+    clip_grad_norm,
 )
 from lingua.logger import init_logger
 from lingua.metrics import (
@@ -65,7 +66,7 @@ from lingua.model import (
 )
 
 import wandb
-
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
 
@@ -130,9 +131,9 @@ def validate_train_args(args: TrainArgs, output_size: int):
         logger.info(f"Setting checkpoint path to {str(Path(args.dump_dir) / 'checkpoints')}")
         args.checkpoint.path = str(Path(args.dump_dir) / "checkpoints")
 
-    for source in args.data.sources:
-        data_path = os.path.join(args.data.root_dir, source)
-        assert os.path.exists(data_path), f"{data_path} doesn't exist"
+    # for source in args.data.sources:
+    #     data_path = os.path.join(args.data.root_dir, source)
+    #     assert os.path.exists(data_path), f"{data_path} doesn't exist"
 
     if (
         args.distributed.dp_replicate
@@ -255,16 +256,26 @@ def train(args: TrainArgs):
         # Initializing Model in meta device allows us to initialize models much bigger than 1 gpu's memory
         with torch.device("meta"):
             model = load_model_from_config(args.model.model_name, args.model.config_path)
+            
         logger.info("Model is built !")
 
         model_param_count = get_num_params(model)
 
+        # model = parallelize_model(
+        #     model,
+        #     world_mesh,
+        #     args.model,
+        #     args.distributed,
+        #     fsdp_grouping_plan=build_fsdp_grouping_plan(args.model),
+        #     tp_parallelize=None,
+        #     no_recompute_ops=None,
+        # )
         model = parallelize_model(
             model,
             world_mesh,
             args.model,
             args.distributed,
-            fsdp_grouping_plan=build_fsdp_grouping_plan(args.model),
+            fsdp_grouping_plan=None,
             tp_parallelize=None,
             no_recompute_ops=None,
         )
@@ -354,7 +365,7 @@ def train(args: TrainArgs):
                 # run the GC at different times so they slow down the whole pipeline
                 gc.collect()
 
-            input_ids = batch[:, :].cuda()
+            input_ids = batch[:, :, 0].cuda()
             labels = input_ids
             # labels = batch[:, :, 1].cuda()
             data_load_time = round(timer() - data_load_start, 4)
@@ -367,7 +378,7 @@ def train(args: TrainArgs):
             end_timer = torch.cuda.Event(enable_timing=True)
             start_timer.record()
 
-            output = model(input_ids, labels)
+            output = model(input_ids=input_ids, labels=labels)
             loss = output.loss
 
             if args.grad_acc_steps > 1:
@@ -384,7 +395,10 @@ def train(args: TrainArgs):
             # optimizer step
             grad_norm = -1.0
             if train_state.acc_step == 0:
-                grad_norm = torch.nn.utils.clip_grad_norm_(
+                # grad_norm = torch.nn.utils.clip_grad_norm_(
+                #     model.parameters(), max_norm=args.optim.clip, foreach=True
+                # )
+                grad_norm = clip_grad_norm(
                     model.parameters(), max_norm=args.optim.clip, foreach=True
                 )
 

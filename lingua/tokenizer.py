@@ -233,5 +233,8 @@ def build_tokenizer(name: str, path: Optional[str] = None) -> Tokenizer:
         return TikTokenTokenizer(path)
     elif name == "huggingface":
         return HFTokenizer(path)
+    elif name == "neox":
+        from transformers import AutoTokenizer
+        return HFTokenizer("EleutherAI/pythia-70m-deduped")
     else:
         raise NotImplementedError(f"{name} tokenizer type is not implemented")

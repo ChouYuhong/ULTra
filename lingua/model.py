@@ -5,13 +5,14 @@ from dataclasses import dataclass
 @dataclass
 class BaseTransformerArgs:
 
-    name_type: Literal["backbone", "model"]
+    name_type: str = "model" # ["backbone, "model"]
     model_name: str = "transformer"
     seed: int = 42
     config_path: str = ""
     dim: int = 512
     n_layers: int = 8
     max_seqlen: int = 2048 # will be set by data.seqlen
+    vocab_size: int = 32000
 
 # Optional and only used for fully shard options (fsdp) is choose. Highly recommanded for large models
 def build_fsdp_grouping_plan(model_args: BaseTransformerArgs):
@@ -19,22 +20,22 @@ def build_fsdp_grouping_plan(model_args: BaseTransformerArgs):
 
     if model_args.name_type == "model":
         # Grouping and output seperately
-        group_plan.append(("model.embeddings", True))
+        group_plan.append(("model.embeddings", False))
 
         # Grouping by layers
         for i in range(model_args.n_layers):
-            group_plan.append((f"model.layers.{i}", True))
+            group_plan.append((f"model.layers.{i}", False))
     elif model_args.name_type == "backbone":
         # Grouping and output seperately
-        group_plan.append(("backbone.embeddings", True))
+        group_plan.append(("backbone.embeddings", False))
 
         # Grouping by layers
         for i in range(model_args.n_layers):
-            group_plan.append((f"backbone.layers.{i}", True))
+            group_plan.append((f"backbone.layers.{i}", False))
 
     # NOTE here is a dangerous that the lm_head's forward function is not called
     # So I choose no fsdp for the output linear layer, at most cost about 2GB for 32k vocabulary
-    # group_plan.append(("lm_head", False))
+    group_plan.append(("lm_head", False))
 
     return group_plan
 
@@ -87,6 +88,13 @@ def load_model_from_config(model_name, config_file):
     elif model_name == "gdn":
         from fla.models import GatedDeltaNetForCausalLM, GatedDeltaNetConfig
         model = GatedDeltaNetForCausalLM(GatedDeltaNetConfig.from_pretrained(config_file))
+    elif model_name == "neox":
+        from transformers import AutoModelForCausalLM
+        from transformers.models.gpt_neox import GPTNeoXForCausalLM
+        model = AutoModelForCausalLM.from_pretrained("EleutherAI/pythia-70m-deduped",
+            revision="step3000",
+            cache_dir="./pythia-70m-deduped/step3000",
+            )
     else:
         raise ValueError(f"Unknown model name: {model_name}")
     return model

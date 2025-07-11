@@ -61,7 +61,7 @@ build_seperate_token_packing_dataloader does the same thing but swaps step 2 and
 Both can be called with a resume_state to resume from any given position deterministically
 """
 
-TRAIN_DATA_FILE_PATTERN = "*.chunk.*.jsonl"
+TRAIN_DATA_FILE_PATTERN = "*chunk.*.jsonl"
 
 class JSONLState(TypedDict):
     """Represents the current state of a JSON line reader.
@@ -257,7 +257,7 @@ def loop_on_jsonl(
     load_type: str
 ):
     """Makes the block jsonl iterator infinite and updates n_iter counter"""
-    assert load_type == "josnl", "load_type must be 'jsonl'"
+    assert load_type == "jsonl", "load_type must be 'jsonl'"
     try:
         while True:
             it = read_jsonl(file_path, position, block_size, offset, current_iter, load_type=load_type)
@@ -585,13 +585,14 @@ def distribute_data_to_rank(dataset_path: str, rank: int, world_size: int, file_
         Given a string in the format "load_type:data_path",
         returns (load_type, data_path).
         """
-        parts = dataset_path.split(":", 1)
+        parts = dataset_path.split(".", 1)
         if len(parts) != 2:
             raise ValueError(f"Invalid dataset_path format: {dataset_path}")
         load_type, data_path = parts
         return load_type, data_path
     load_type, data_path = parse_dataset_path(dataset_path)
-    if load_type is not "jsonl":
+
+    if load_type != "jsonl":
         n_ranks_per_chunk = world_size
         rank_to_jsonl_iterator_params = []
         
@@ -619,6 +620,7 @@ def distribute_data_to_rank(dataset_path: str, rank: int, world_size: int, file_
                         block_size=n_ranks_per_chunk,
                         offset=i,
                         current_iter=0,
+                        load_type=load_type
                     )
                 )
 
@@ -636,7 +638,7 @@ def init_choice_state(
     data_path_to_jsonl_state = dict()
     for dataset_path in sources:
         jsonl_state = distribute_data_to_rank(
-            os.path.join(root_dir, dataset_path), rank, world_size, file_pattern
+            dataset_path, rank, world_size, file_pattern
         )
         data_path_to_jsonl_state[dataset_path] = jsonl_state
 
@@ -705,7 +707,7 @@ def setup_sources(multi_state):
     for source in multi_state["sources"]:
         jsonl_state = multi_state["source_to_state"][source]
 
-        if jsonl_state["load_type"] is "jsonl":
+        if jsonl_state["load_type"] == "jsonl":
             path_to_iter[source] = loop_on_jsonl(
                 jsonl_state["file_path"],
                 jsonl_state["position"],
