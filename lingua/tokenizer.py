@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TokenizerArgs:
-    name: str = "hf"
+    name: str = "huggingface"
     path: Optional[str] = None
 
 
@@ -231,7 +231,7 @@ def build_tokenizer(name: str, path: Optional[str] = None) -> Tokenizer:
         return SentencePieceTokenizer(path)
     elif name == "tiktoken":
         return TikTokenTokenizer(path)
-    elif name == "hf":
+    elif name == "huggingface":
         return HFTokenizer(path)
     else:
         raise NotImplementedError(f"{name} tokenizer type is not implemented")

@@ -6,25 +6,12 @@ from dataclasses import dataclass
 class BaseTransformerArgs:
 
     name_type: Literal["backbone", "model"]
+    model_name: str = "transformer"
+    seed: int = 42
     config_path: str = ""
     dim: int = 512
     n_layers: int = 8
-    head_dim: Optional[int] = None
-    n_heads: Optional[int] = None
-    n_kv_heads: Optional[int] = None
-
-    ffn_dim_multiplier: Optional[float] = None
-
-    multiple_of: int = 256
-
-    norm_eps: float = 1e-5
-
-    rope_theta: float = 10000.0
-
-    init_base_std: Optional[float] = None
-    init_std_factor: str = "disabled"
-
-    max_seqlen: int = 1024
+    max_seqlen: int = 2048 # will be set by data.seqlen
 
 # Optional and only used for fully shard options (fsdp) is choose. Highly recommanded for large models
 def build_fsdp_grouping_plan(model_args: BaseTransformerArgs):

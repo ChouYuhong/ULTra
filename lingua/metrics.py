@@ -40,8 +40,6 @@ class WandbArgs:
     monitor_gym: Optional[bool] = None
     save_code: Optional[bool] = None
     id: Optional[str] = None
-    fork_from: Optional[str] = None
-    resume_from: Optional[str] = None
 
 
 @dataclass

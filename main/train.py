@@ -81,7 +81,6 @@ class TrainArgs:
     grad_acc_steps: int = 1
 
     gc_collect_freq: int = 1000
-    # probe_freq: Optional[int] = None
 
     # Nb optimizer steps to take
     steps: int = 1000
@@ -93,13 +92,7 @@ class TrainArgs:
     env: EnvironmentArgs = field(default_factory=EnvironmentArgs)
 
     checkpoint: CheckpointArgs = field(default_factory=CheckpointArgs)
-    # profiling: ProfilerArgs = field(default_factory=ProfilerArgs)
     logging: LoggingArgs = field(default_factory=LoggingArgs)
-
-    # If set to None, eval is run locally otherwise it launches a new job with the given number of gpus
-    async_eval_gpus: Optional[int] = None
-    eval: Optional[Any] = None
-
 
 @dataclass
 class TrainState(Stateful):
@@ -261,7 +254,7 @@ def train(args: TrainArgs):
 
         # Initializing Model in meta device allows us to initialize models much bigger than 1 gpu's memory
         with torch.device("meta"):
-            model = load_model_from_config(args.model.name_type, args.model.config_path)
+            model = load_model_from_config(args.model.model_name, args.model.config_path)
         logger.info("Model is built !")
 
         model_param_count = get_num_params(model)
@@ -494,7 +487,7 @@ def train(args: TrainArgs):
             saved = False
             if every_n_steps(
                 train_state, args.checkpoint.dump.every, acc_step=0
-            ) or every_n_steps(train_state, args.checkpoint.eval.every, acc_step=0):
+            ):
                 saved = checkpoint.save(
                     model,
                     optimizer,
