@@ -137,3 +137,26 @@ def load_config_from_path(model_name, path):
     else:
         raise ValueError(f"Unknown model name: {model_name}")
     return config
+
+def get_config(model_name):
+    if model_name == "transformer":
+        from fla.models import TransformerConfig
+        config = TransformerConfig()
+    elif model_name == "gla":
+        from fla.models import GLAConfig
+        config = GLAConfig()
+    elif model_name == "hgrn2":
+        from fla.models import HGRN2Config
+        config = HGRN2Config()
+    elif model_name == "mamba":
+        from fla.models import MambaConfig
+        config = MambaConfig()
+    elif model_name == "mamba2":
+        from fla.models import Mamba2Config
+        config = Mamba2Config()
+    elif model_name == "gdn":
+        from fla.models import GatedDeltaNetConfig
+        config = GatedDeltaNetConfig()
+    else:
+        raise ValueError(f"Unknown model name: {model_name}")
+    return config
