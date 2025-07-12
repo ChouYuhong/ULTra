@@ -13,7 +13,6 @@ from pathlib import Path
 from timeit import default_timer as timer
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 from omegaconf import OmegaConf
 import torch
 import torch.distributed
