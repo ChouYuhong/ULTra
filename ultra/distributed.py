@@ -21,6 +21,7 @@ from datetime import timedelta
 import torch
 from torch.distributed import ReduceOp
 from torch import distributed as dist
+from torch.distributed import scatter
 from torch.distributed._tensor import DTensor
 from torch.distributed._composable.fsdp import MixedPrecisionPolicy, fully_shard
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -435,3 +436,24 @@ def parallelize_model(
     assert distributed_args.compile == False, "Compile is not supported"
 
     return model
+
+def sp_dataloader(step, sp_rank, sp_degree, data_loader_state, data_args, data_loader):
+    if step % sp_degree == sp_rank:
+        # NOTE here should be skip for sequence parallelism
+        batch, data_loader_state = next(data_loader)
+        batch = torch.tensor(
+            batch,
+            dtype=torch.long,
+            device="cuda",
+        )
+        batch_list = torch.chunk(batch, sp_degree, dim=1)
+        batch = batch_list[sp_rank]
+        scatter(tensor=batch, scatter_list=batch_list, group=sp_group, group_src=sp_rank,)
+    else:
+        batch = torch.empty(
+            (data_args.batch_size, data_args.seq_len // sp_degree, data_args.n_views),
+            dtype=torch.long,
+            device="cuda",
+        )
+        scatter(tensor=batch, scatter_list=None, group=sp_group, group_src=sp_rank,)
+    return batch, data_loader_state

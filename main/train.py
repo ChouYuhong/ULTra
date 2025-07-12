@@ -17,7 +17,6 @@ import numpy as np
 from omegaconf import OmegaConf
 import torch
 import torch.distributed
-from torch.distributed import scatter
 import torch.nn.functional as F
 from torch import distributed as dist
 from torch.optim import lr_scheduler
@@ -43,6 +42,7 @@ from ultra.distributed import (
     setup_env,
     setup_torch_distributed,
     check_model_value_range,
+    sp_dataloader,
 )
 from ultra.logger import init_logger
 from ultra.metrics import (
@@ -153,6 +153,41 @@ def validate_train_args(args: TrainArgs, output_size: int):
     if args.logging.wandb is not None:
         args.logging.wandb.name = args.name
 
+def verify_world_mesh(
+    distributed_args, 
+    world_mesh,
+):
+    dp_mesh = world_mesh["dp_replicate"]
+    dp_degree = dp_mesh.size()
+    dp_rank = dp_mesh.get_local_rank()
+    if distributed_args.dp_shard > 1:
+        dp_rank = dp_rank * world_mesh["dp_shard"].size() + world_mesh["dp_shard"].get_local_rank()
+        dp_degree *= world_mesh["dp_shard"].size()
+    
+    sp_mesh = world_mesh["sp_replicate"]
+    sp_degree = sp_mesh.size()
+    sp_rank = sp_mesh.get_local_rank()
+    if distributed_args.sp_shard > 1:
+        sp_rank = sp_rank * world_mesh["sp_shard"].size() + world_mesh["sp_shard"].get_local_rank()
+        sp_degree *= world_mesh["sp_shard"].size()
+    
+    dp_group = world_mesh["dp"].get_group()
+    assert dp_rank == dist.get_rank(group=dp_group)
+    sp_group = world_mesh["sp"].get_group()
+    assert sp_rank == dist.get_rank(group=sp_group)
+    logger.info(f"Running on sp rank : {sp_rank}")
+
+    logger.info(f"Running on dp rank : {dp_rank}")
+    logger.info(f"Running on dp size : {dp_degree}")
+
+    # build dataloader
+    # need dp world size and rank
+    loader_mesh = world_mesh["loader"]
+    loader_rank = loader_mesh.get_local_rank()
+    loader_degree = loader_mesh.size()
+
+    return dp_rank, dp_degree, sp_rank, sp_degree, loader_rank, loader_degree
+
 def every_n_steps(train_state, freq, acc_step=None, acc_freq=None):
     test = train_state.step % freq == 0
     if acc_step is not None:
@@ -178,37 +213,9 @@ def train(args: TrainArgs):
         world_mesh = get_device_mesh(args.distributed)
         logger.info(f"Starting job: {args.name}")
 
-        # check the dp and sp rank
-        dp_mesh = world_mesh["dp_replicate"]
-        dp_degree = dp_mesh.size()
-        dp_rank = dp_mesh.get_local_rank()
-        if args.distributed.dp_shard > 1:
-            dp_rank = dp_rank * world_mesh["dp_shard"].size() + world_mesh["dp_shard"].get_local_rank()
-            dp_degree *= world_mesh["dp_shard"].size()
-        
-        sp_mesh = world_mesh["sp_replicate"]
-        sp_degree = sp_mesh.size()
-        sp_rank = sp_mesh.get_local_rank()
-        if args.distributed.sp_shard > 1:
-            sp_rank = sp_rank * world_mesh["sp_shard"].size() + world_mesh["sp_shard"].get_local_rank()
-            sp_degree *= world_mesh["sp_shard"].size()
-        
-        dp_group = world_mesh["dp"].get_group()
-        assert dp_rank == dist.get_rank(group=dp_group)
-        sp_group = world_mesh["sp"].get_group()
-        assert sp_rank == dist.get_rank(group=sp_group)
-        logger.info(f"Running on sp rank : {sp_rank}")
-
-        logger.info(f"Running on dp rank : {dp_rank}")
-        logger.info(f"Running on dp size : {dp_degree}")
+        dp_rank, dp_degree, sp_rank, sp_degree, loader_rank, loader_degree = verify_world_mesh(args.distributed, world_mesh)
 
         assert args.data.seq_len % sp_degree == 0, "sp size times of seqlens"
-
-        # build dataloader
-        # need dp world size and rank
-        loader_mesh = world_mesh["loader"]
-        loader_rank = loader_mesh.get_local_rank()
-        loader_degree = loader_mesh.size()
 
         torch.manual_seed(args.seed)
         logger.info("Building model")
@@ -230,13 +237,7 @@ def train(args: TrainArgs):
             tp_parallelize=None,
             no_recompute_ops=None,
         )
-
-        # Once we shard the model on different gpus we can actually initialize the model
-        # First we create empty tensors of the correct shapes
         model = model.to_empty(device="cuda")
-        # Then we init the model. Please make sure this function initializes *ALL* parameters
-        # and buffers, otherwise you will have random values in the unitialized tensors
-        # which will silently fail (give nan gradients for example)
 
         # NOTE the key point here is that we need to find a distributed checkpoint loading
         if args.checkpoint.init_ckpt_path:
@@ -307,24 +308,7 @@ def train(args: TrainArgs):
             data_load_start = timer()
             # get batch
             if sp_degree > 1:
-                if train_state.step % sp_degree == sp_rank:
-                    # NOTE here should be skip for sequence parallelism
-                    batch, train_state.data_loader_state = next(data_loader)
-                    batch = torch.tensor(
-                        batch,
-                        dtype=torch.long,
-                        device="cuda",
-                    )
-                    batch_list = torch.chunk(batch, sp_degree, dim=1)
-                    batch = batch_list[sp_rank]
-                    scatter(tensor=batch, scatter_list=batch_list, group=sp_group, group_src=sp_rank,)
-                else:
-                    batch = torch.empty(
-                        (args.data.batch_size, args.data.seq_len // sp_degree, args.data.n_views),
-                        dtype=torch.long,
-                        device="cuda",
-                    )
-                    scatter(tensor=batch, scatter_list=None, group=sp_group, group_src=sp_rank,)
+                batch, train_state.data_loader_state = sp_dataloader(train_state.step, sp_rank, sp_degree, train_state.data_loader_state, args.data, data_loader)
             else:
                 batch, train_state.data_loader_state = next(data_loader)
                 batch = torch.tensor(
@@ -383,8 +367,6 @@ def train(args: TrainArgs):
             torch.cuda.synchronize()
 
             curr_iter_time = round(start_timer.elapsed_time(end_timer) * 1e-3, 4)
-
-
 
             # log metrics
             if every_n_steps(
