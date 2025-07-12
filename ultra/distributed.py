@@ -16,7 +16,7 @@ import tempfile
 from dataclasses import asdict, dataclass
 from functools import lru_cache, partial, reduce
 from typing import List, Optional, Tuple, Union, Iterable
-
+from torch.distributed import get_group_rank
 from datetime import timedelta
 import torch
 from torch.distributed import ReduceOp
@@ -32,26 +32,12 @@ from torch.utils.checkpoint import (
 )
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
-# for no recompute ops
-# import xformers.ops
 
-from lingua.float8 import convert_linears_to_fp8
+from ultra.float8 import convert_linears_to_fp8
 
+logging.getLogger('databus').setLevel(logging.WARNING)
 logger = logging.getLogger()
-
-# for selective AC
-# default_no_recompute_ops = {
-#     torch.ops.aten.mm.default,
-#     torch.ops.aten._scaled_mm.default,
-#     torch.ops.aten._scaled_dot_product_efficient_attention.default,
-#     torch.ops.aten._scaled_dot_product_flash_attention.default,
-#     torch.ops.c10d_functional.reduce_scatter_tensor.default,
-#     torch.ops.xformers_flash.flash_fwd.default,
-# }
-# with contextlib.suppress(AttributeError):  # ignore exception if op is missing (old xFormers)
-#     default_no_recompute_ops.add(torch.ops.xformers.efficient_attention_forward_cutlass.default)
-#     default_no_recompute_ops.add(torch.ops.xformers_flash3.flash_fwd.default)
-
+logger.setLevel(logging.INFO)
 
 @dataclass
 class DistributedArgs:
@@ -62,7 +48,7 @@ class DistributedArgs:
     tp_size: int = 1
 
     activation_checkpointing: bool = False
-    # selective_activation_checkpointing: bool = False
+
     compile: bool = False
     fsdp_type: str = "no_shard"
     model_dtype: str = "bf16"
@@ -84,8 +70,11 @@ class EnvironmentArgs:
     MKL_SERVICE_FORCE_INTEL: str = "GNU"
     OMP_NUM_THREADS: str = "1"
     MKL_NUM_THREADS: str = "1"
+
     # faster intra-node collectives, seems to be a cluster specific flag
-    ENABLE_INTRA_NODE_COMM: str = "1"
+    # never open the intra node comm in merlin cluster!!! it make grad clip error!!!
+    # ENABLE_INTRA_NODE_COMM: str = "1"
+    
     # avoids OOMs with long context
     TORCH_NCCL_AVOID_RECORD_STREAMS: str = "1"
     # increasing NCCL timeout time before having some NCCL error 22 should give a 16s timeout
@@ -95,17 +84,18 @@ class EnvironmentArgs:
 
 
 def get_device_mesh(distributed_args: DistributedArgs):
+    
     tp_size = distributed_args.tp_size
     dp_replicate = distributed_args.dp_replicate
     sp_replicate = distributed_args.sp_replicate
     dp_shard = distributed_args.dp_shard
     sp_shard = distributed_args.sp_shard
 
-    assert tp_size == 1, "we currently do not support tp"
+    assert tp_size == 1, "we currently do not support tp, tobe done soon"
 
     assert (
-        dp_shard * dp_replicate * sp_shard * sp_replicate == get_world_size()
-    ), f"dp_shard * dp_replicate * dp_shard * tp_size ({dp_shard} * {dp_replicate} * {sp_shard} * {sp_replicate}) != world_size ({get_world_size()})"
+        dp_shard * dp_replicate * sp_shard * sp_replicate * tp_size == get_world_size()
+    ), f"dp_shard * dp_replicate * sp_shard * sp_replicate * tp_size ({dp_shard} * {dp_replicate} * {sp_shard} * {sp_replicate} * {tp_size}) != world_size ({get_world_size()})"
 
     dims = []
     names = []
@@ -117,15 +107,15 @@ def get_device_mesh(distributed_args: DistributedArgs):
     if sp_replicate >= 1:
         dims.append(sp_replicate)
         names.append("sp_replicate")
-    if tp_size > 1:
-        dims.append(tp_size)
-        names.append("tp")
     if dp_shard >= 1 or distributed_args.fsdp_type == "no_shard":
         dims.append(dp_shard)
         names.append("dp_shard")
     if sp_shard >= 1 or distributed_args.fsdp_type == "no_shard":
         dims.append(sp_shard)
         names.append("sp_shard")
+    if tp_size > 1:
+        dims.append(tp_size)
+        names.append("tp")
     
     dims = tuple(dims)
     names = tuple(names)
@@ -136,9 +126,12 @@ def get_device_mesh(distributed_args: DistributedArgs):
     # NOTE prepare dp, sp mesh
     device_mesh[tuple(["dp_replicate", "dp_shard"])]._flatten(mesh_dim_name="dp")
     device_mesh[tuple(["sp_replicate", "sp_shard"])]._flatten(mesh_dim_name="sp")
+    device_mesh[tuple(["dp_replicate", "sp_replicate", "dp_shard", "sp_shard"])]._flatten(mesh_dim_name="loader")
+    # NOTE prepare fsdp mesh
+    device_mesh[tuple(["dp_replicate", "sp_replicate"])]._flatten(mesh_dim_name="replicate")
+    device_mesh[tuple(["dp_shard", "sp_shard"])]._flatten(mesh_dim_name="shard")
 
     return device_mesh
-
 
 def dist_max(x: Union[int, float], mesh: DeviceMesh = None):
     tensor = torch.tensor(x).cuda()
@@ -317,19 +310,6 @@ def default_fsdp_grouping_plan(n_layers: int) -> List[Tuple[str, bool]]:
     return [(f"layers.{i}", i < n_layers - 1) for i in range(n_layers)]
 
 
-# def get_default_policy(no_recompute_ops=None):
-#     no_recompute_ops = no_recompute_ops or default_no_recompute_ops
-
-#     def default_policy(ctx, func, *args, **kwargs):
-#         return (
-#             CheckpointPolicy.MUST_SAVE
-#             if func in no_recompute_ops
-#             else CheckpointPolicy.PREFER_RECOMPUTE
-#         )
-
-#     return default_policy
-
-
 @torch.no_grad()
 def check_model_value_range(
     model: torch.nn.Module, range: float = 1e3, std: float = 1e3
@@ -367,52 +347,6 @@ def check_model_value_range(
                 f"Model parameter {name} is all zeros: it might be because of a missing initialization"
             )
 
-
-def init_signal_handler(callable):
-    """
-    Handle signals sent by SLURM for time limit / pre-emption.
-    """
-    signal.signal(signal.SIGUSR2, callable)
-    logger.warning("Signal handler installed.")
-
-
-def requeue_slurm_job():
-    prod_id = int(os.environ["SLURM_PROCID"])
-    logger.warning("Host: %s - Global rank: %i" % (socket.gethostname(), prod_id))
-    if prod_id == 0 and os.environ.get("LAUNCH_WITH", "") != "DORA":
-        logger.warning("Requeuing job " + os.environ["SLURM_JOB_ID"])
-        os.system("scontrol requeue " + os.environ["SLURM_JOB_ID"])
-    else:
-        logger.warning("Not the master process, no need to requeue.")
-    sys.exit(0)
-
-
-@contextlib.contextmanager
-def clean_env():
-    distrib_names = (
-        "MASTER_ADDR",
-        "MASTER_PORT",
-        "RANK",
-        "WORLD_SIZE",
-        "LOCAL_RANK",
-        "LOCAL_WORLD_SIZE",
-        "TORCHELASTIC_RUN_ID",
-        "DORA_FORCE_DISTRIB",
-    )
-    cluster_env = {
-        x: os.environ.pop(x)
-        for x in os.environ
-        if x.startswith(
-            ("SLURM_", "SLURMD_", "SRUN_", "SBATCH_", "SUBMITIT_", "WANDB_")
-        )
-        or x in distrib_names
-    }
-    try:
-        yield
-    finally:
-        os.environ.update(cluster_env)
-
-
 def parallelize_model(
     model,
     device_mesh,
@@ -427,6 +361,9 @@ def parallelize_model(
         model = convert_linears_to_fp8(
             model, distributed_args.float8_recipe, distributed_args.float8_filter
         )
+
+    # NOTE assert we have already get fsdp plan
+    assert fsdp_grouping_plan is not None, "fsdp_grouping_plan is required"
 
     # NOTE process tp parallelism, currently we dont use it since we assert tp_size == 1
     if distributed_args.tp_size > 1:
@@ -461,10 +398,6 @@ def parallelize_model(
                 device_mesh["sp_shard"].size() == 1
             ), "dp_shard must be 1 for no_shard fsdp_type"
 
-        # NOTE prepare fsdp mesh
-        device_mesh[tuple(["dp_replicate", "sp_replicate"])]._flatten(mesh_dim_name="replicate")
-        device_mesh[tuple(["dp_shard", "sp_shard"])]._flatten(mesh_dim_name="shard")
-
         fsdp_config = dict(
             mp_policy=(
                 MixedPrecisionPolicy(
@@ -480,104 +413,25 @@ def parallelize_model(
             ),
         )
 
-        # NOTE assert we have already get fsdp plan
-
-        # if fsdp_grouping_plan is None:
-        #     # Assume that the model has list of layers and group around it
-        #     fsdp_grouping_plan = default_fsdp_grouping_plan(len(model.layers))
-        # assert fsdp_grouping_plan is not None, "fsdp_grouping_plan is required"
-
-        # for path, reshard_after_forward in fsdp_grouping_plan:
-        #     module = get_module(model, path)
-        #     set_module(
-        #         model,
-        #         path,
-        #         fully_shard(
-        #             module, **fsdp_config, reshard_after_forward=reshard_after_forward
-        #         ),
-        #     )
+        for path, reshard_after_forward in fsdp_grouping_plan:
+            module = get_module(model, path)
+            set_module(
+                model,
+                path,
+                fully_shard(
+                    module, **fsdp_config, reshard_after_forward=reshard_after_forward
+                ),
+            )
 
         model = fully_shard(model, **fsdp_config, reshard_after_forward=True)
     else:
         raise ValueError(f"Invalid fsdp_type: {distributed_args.fsdp_type}")
 
     # NOTE we open activation checkpointing right after fsdp
-    # if distributed_args.selective_activation_checkpointing:
-    #     model = checkpoint_wrapper(
-    #         model,
-    #         context_fn=partial(
-    #             create_selective_checkpoint_contexts,
-    #             get_default_policy(no_recompute_ops),
-    #         ),
-    #     )
+    if distributed_args.activation_checkpointing:
+        model.gradient_checkpointing_enable()
 
     # NOTE we do not rely on compile
     assert distributed_args.compile == False, "Compile is not supported"
-    # if distributed_args.compile:
-    #     torch._dynamo.config.cache_size_limit = (
-    #         distributed_args.compile_cache_size_limit
-    #     )
-    #     model.compile()
 
     return model
-
-@torch.no_grad()
-def clip_grad_norm(
-    parameters: torch.Tensor | Iterable[torch.Tensor],
-    max_norm: float,
-    norm_type: float = 2.0,
-    error_if_nonfinite: bool = False,
-    foreach: bool | None = None,
-) -> torch.Tensor:
-    """
-    Clip the gradient norm of an iterable of parameters.
-
-    Gradient norm clipping requires computing the gradient norm over the entire model.
-    `torch.nn.utils.clip_grad_norm_` only computes gradient norm along DP/FSDP/TP dimensions.
-    We need to manually reduce the gradient norm across PP stages.
-    See https://github.com/pytorch/torchtitan/issues/596 for details.
-
-    Args:
-        parameters: an iterable of Tensors or a single Tensor that will have gradients normalized
-        max_norm (float): max norm of the gradients
-        norm_type (float): type of the used p-norm. Can be ``'inf'`` for
-            infinity norm.
-        error_if_nonfinite (bool): if True, an error is thrown if the total
-            norm of the gradients from :attr:`parameters` is ``nan``,
-            ``inf``, or ``-inf``. Default: False (will switch to True in the future)
-        foreach (bool): use the faster foreach-based implementation.
-            If ``None``, use the foreach implementation for CUDA and CPU native tensors and silently
-            fall back to the slow implementation for other device types.
-            Default: ``None``
-        pp_mesh: pipeline parallel device mesh. If not None, will reduce gradient norm across PP stages.
-        parallel_dims: ParallelDims object which contains Expert Parallel related info.
-
-    Returns:
-        Total norm of the parameter gradients (viewed as a single vector).
-
-    """
-
-    if isinstance(parameters, torch.Tensor):
-        parameters = [parameters]
-    else:
-        # prevent generators from being exhausted
-        parameters = list(parameters)
-    grads = [p.grad for p in parameters if p.grad is not None]
-    total_norm = torch.nn.utils.get_total_norm(
-        grads, norm_type, error_if_nonfinite, foreach
-    )
-
-    # If total_norm is a DTensor, the placements must be `torch.distributed._tensor.ops.math_ops._NormPartial`.
-    # We can simply reduce the DTensor to get the total norm in this tensor's process group
-    # and then convert it to a local tensor.
-    # NOTE: It has two purposes:
-    #       1. to make sure the total norm is computed correctly when PP is used (see below)
-    #       2. to return a reduced total_norm tensor whose .item() would return the correct value
-    if isinstance(total_norm, DTensor):
-        # Will reach here if any non-PP parallelism is used.
-        # If only using PP, total_norm will be a local tensor.
-        
-        total_norm = total_norm.full_tensor()
-
-    torch.nn.utils.clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
-    return total_norm

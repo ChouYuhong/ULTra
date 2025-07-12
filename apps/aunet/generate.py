@@ -28,11 +28,11 @@ from apps.main.generate import (
     sample_tokens,
 )
 
-from lingua.args import dataclass_from_dict
-from lingua.tokenizer import Tokenizer, build_tokenizer
+from ultra.args import dataclass_from_dict
+from ultra.tokenizer import Tokenizer, build_tokenizer
 
-from lingua.checkpoint import CONSOLIDATE_NAME
-from lingua.transformer import Attention, causal_mask, generate_doc_mask_mod, lengths_to_local_ids, lengths_to_start_ids
+from ultra.checkpoint import CONSOLIDATE_NAME
+from ultra.transformer import Attention, causal_mask, generate_doc_mask_mod, lengths_to_local_ids, lengths_to_start_ids
 
 def causal_sliding_mask(sliding_window: int):
     def mask(b, h, q_idx, kv_idx):

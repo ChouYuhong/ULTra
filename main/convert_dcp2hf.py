@@ -3,7 +3,7 @@ import os
 import torch
 import torch.distributed.checkpoint as dcp
 from torch.distributed.checkpoint.state_dict import get_model_state_dict
-from lingua.model import load_model_from_config
+from ultra.model import load_model_from_config
 
 def parse_args():
     """Parse command line arguments."""

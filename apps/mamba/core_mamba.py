@@ -17,8 +17,8 @@ from apps.mamba.component.causal_conv1d_compilable import (
 from apps.mamba.component.ssm_compilable import mamba_chunk_scan_combined
 from mamba_ssm.ops.triton.selective_state_update import selective_state_update
 
-from lingua.transformer import InitStdFactor, RMSNorm
-from lingua.probe import log_stats
+from ultra.transformer import InitStdFactor, RMSNorm
+from ultra.probe import log_stats
 
 
 @dataclass

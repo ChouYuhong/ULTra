@@ -3,7 +3,7 @@ from typing import Optional, Union
 import os
 import torch
 
-from lingua.model import load_model_from_path, load_config_from_path
+from ultra.model import load_model_from_path, load_config_from_path
 from lm_eval.api.model import LM
 from lm_eval.models.huggingface import HFLM
 from lm_eval.api.registry import register_model

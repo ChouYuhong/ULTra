@@ -17,7 +17,7 @@ from torch.distributed.tensor.parallel import (
 )
 
 from xformers.ops import fmha, AttentionBias
-from lingua.transformer import (
+from ultra.transformer import (
     BaseTransformer,
     BaseTransformerArgs,
     RMSNorm,

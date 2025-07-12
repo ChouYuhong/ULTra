@@ -20,9 +20,9 @@ from apps.main.generate import (
     load_consolidated_model_and_tokenizer,
 )
 from apps.mtp.transformer import LMTransformer, LMMTPArgs
-from lingua.args import dump_config
-from lingua.checkpoint import CONSOLIDATE_FOLDER, consolidate_checkpoints
-from lingua.distributed import DistributedArgs, get_global_rank, setup_torch_distributed
+from ultra.args import dump_config
+from ultra.checkpoint import CONSOLIDATE_FOLDER, consolidate_checkpoints
+from ultra.distributed import DistributedArgs, get_global_rank, setup_torch_distributed
 
 EVAL_FOLDER_NAME = "{:010d}"
 

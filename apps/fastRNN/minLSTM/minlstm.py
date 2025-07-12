@@ -6,7 +6,7 @@ from typing import Optional
 import torch
 from torch import nn
 
-from lingua.transformer import RMSNorm, TiedLinear, cross_entropy
+from ultra.transformer import RMSNorm, TiedLinear, cross_entropy
 from apps.fastRNN.minLSTM.core_lstm import BaseMinLSTMArgs, BaseMinLSTM
 
 

@@ -17,24 +17,24 @@ import numpy as np
 from omegaconf import OmegaConf
 import torch
 import torch.distributed
+from torch.distributed import scatter
 import torch.nn.functional as F
 from torch import distributed as dist
 from torch.optim import lr_scheduler
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed._tensor import DTensor
 
-from lingua.args import dataclass_from_dict, dump_config, flatten_dict
-from lingua.checkpoint import CheckpointArgs, CheckpointManager, load_from_checkpoint
-from lingua.data import (
+from ultra.args import dataclass_from_dict, dump_config, flatten_dict
+from ultra.checkpoint import CheckpointArgs, CheckpointManager, load_from_checkpoint
+from ultra.data import (
     DataArgs,
     PackTokensState,
     build_dataloader_from_args,
     init_dataloader_state_from_args,
 )
-from lingua.distributed import (
+from ultra.distributed import (
     DistributedArgs,
     EnvironmentArgs,
-    init_signal_handler,
     dist_mean_dict,
     get_device_mesh,
     get_is_master,
@@ -42,21 +42,18 @@ from lingua.distributed import (
     parallelize_model,
     setup_env,
     setup_torch_distributed,
-    clean_env,
-    requeue_slurm_job,
     check_model_value_range,
-    clip_grad_norm,
 )
-from lingua.logger import init_logger
-from lingua.metrics import (
+from ultra.logger import init_logger
+from ultra.metrics import (
     GPUMemoryMonitor,
     LoggingArgs,
     MetricLogger,
     get_num_params,
 )
-from lingua.optim import OptimArgs, build_optimizer
-from lingua.tokenizer import build_tokenizer
-from lingua.model import (
+from ultra.optim import OptimArgs, build_optimizer
+from ultra.tokenizer import build_tokenizer
+from ultra.model import (
     BaseTransformerArgs,
     reinit_weights,
     reset_rope_cache,
@@ -68,7 +65,6 @@ from lingua.model import (
 import wandb
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
-
 
 @dataclass
 class TrainArgs:
@@ -131,74 +127,31 @@ def validate_train_args(args: TrainArgs, output_size: int):
         logger.info(f"Setting checkpoint path to {str(Path(args.dump_dir) / 'checkpoints')}")
         args.checkpoint.path = str(Path(args.dump_dir) / "checkpoints")
 
-    # for source in args.data.sources:
-    #     data_path = os.path.join(args.data.root_dir, source)
-    #     assert os.path.exists(data_path), f"{data_path} doesn't exist"
-
-    if (
+    assert (
         args.distributed.dp_replicate
         * args.distributed.dp_shard
         * args.distributed.tp_size
-        != get_world_size()
-    ):
-        assert get_world_size() % args.distributed.dp_shard == 0
-        args.distributed.dp_replicate = get_world_size() // args.distributed.dp_shard
+        * args.distributed.sp_replicate
+        * args.distributed.sp_shard
+        == get_world_size()
+    ), "DP * TP * SP should be equal to world size"
 
-        assert args.distributed.dp_replicate % args.distributed.tp_size == 0
-        args.distributed.dp_replicate = (
-            args.distributed.dp_replicate // args.distributed.tp_size
-        )
-
-        logger.warning(
-            f"Setting Data Parallel size to {args.distributed.dp_replicate * args.distributed.dp_shard}"
-        )
+    if args.distributed.fsdp_type == "no_shard":
         assert (
-            args.distributed.dp_replicate
-            * args.distributed.dp_shard
-            * args.distributed.tp_size
-            == get_world_size()
+            args.distributed.dp_shard * args.distributed.sp_shard == 1
+            and args.distributed.dp_replicate * args.distributed.sp_replicate == get_world_size()
         )
-
-        if args.distributed.fsdp_type == "no_shard":
-            assert (
-                args.distributed.dp_shard == 1
-                and args.distributed.dp_replicate == get_world_size()
-            )
 
     args.model.max_seqlen = args.data.seq_len
 
+    # NOTE origin lingua code, no test, kidding?
     if args.distributed.tp_size == 1:
         logger.warning(
             "Tensor parallelism has not been tested for a while, use at your own risk"
         )
 
-    # assert (
-    #     args.probe_freq != args.profiling.mem_steps
-    # ), "Don't profile during probe step"
-    # assert (
-    #     args.probe_freq != args.profiling.profile_steps
-    # ), "Don't profile during probe step"
-
     if args.logging.wandb is not None:
         args.logging.wandb.name = args.name
-
-    # if args.probe_freq is not None:
-    #     assert (
-    #         args.distributed.tp_size == 1
-    #     ), "Probing not supported with tensor parallelism"
-    #     assert (
-    #         args.distributed.selective_activation_checkpointing is False
-    #     ), "Probing not supported with selective activation checkpointing"
-
-
-preemption_flag = dict(flag=False)
-
-
-def set_preemption_flag(signum, frame):
-    logger.warning("Signal handler called with signal " + str(signum))
-    logger.warning("Preemption ! checkpointing asap and exiting.")
-    preemption_flag["flag"] = True
-
 
 def every_n_steps(train_state, freq, acc_step=None, acc_freq=None):
     test = train_state.step % freq == 0
@@ -220,35 +173,42 @@ def train(args: TrainArgs):
             os.makedirs(args.dump_dir, exist_ok=True)
             dump_config(args, Path(args.dump_dir) / "config.yaml")
         init_logger(Path(args.dump_dir) / "train.log")
-        init_signal_handler(set_preemption_flag)  # For handling preemption signals.
         setup_env(args.env)
         setup_torch_distributed(args.distributed)
         world_mesh = get_device_mesh(args.distributed)
         logger.info(f"Starting job: {args.name}")
 
-        # build dataloader
-        # need dp world size and rank
+        # check the dp and sp rank
         dp_mesh = world_mesh["dp_replicate"]
         dp_degree = dp_mesh.size()
         dp_rank = dp_mesh.get_local_rank()
         if args.distributed.dp_shard > 1:
             dp_rank = dp_rank * world_mesh["dp_shard"].size() + world_mesh["dp_shard"].get_local_rank()
             dp_degree *= world_mesh["dp_shard"].size()
+        
         sp_mesh = world_mesh["sp_replicate"]
         sp_degree = sp_mesh.size()
         sp_rank = sp_mesh.get_local_rank()
         if args.distributed.sp_shard > 1:
             sp_rank = sp_rank * world_mesh["sp_shard"].size() + world_mesh["sp_shard"].get_local_rank()
             sp_degree *= world_mesh["sp_shard"].size()
+        
         dp_group = world_mesh["dp"].get_group()
         assert dp_rank == dist.get_rank(group=dp_group)
         sp_group = world_mesh["sp"].get_group()
         assert sp_rank == dist.get_rank(group=sp_group)
+        logger.info(f"Running on sp rank : {sp_rank}")
 
         logger.info(f"Running on dp rank : {dp_rank}")
         logger.info(f"Running on dp size : {dp_degree}")
-        logger.info(f"Running on sp rank : {sp_rank}")
-        logger.info(f"Running on sp size : {sp_degree}")
+
+        assert args.data.seq_len % sp_degree == 0, "sp size times of seqlens"
+
+        # build dataloader
+        # need dp world size and rank
+        loader_mesh = world_mesh["loader"]
+        loader_rank = loader_mesh.get_local_rank()
+        loader_degree = loader_mesh.size()
 
         torch.manual_seed(args.seed)
         logger.info("Building model")
@@ -261,26 +221,15 @@ def train(args: TrainArgs):
 
         model_param_count = get_num_params(model)
 
-        # model = parallelize_model(
-        #     model,
-        #     world_mesh,
-        #     args.model,
-        #     args.distributed,
-        #     fsdp_grouping_plan=build_fsdp_grouping_plan(args.model),
-        #     tp_parallelize=None,
-        #     no_recompute_ops=None,
-        # )
         model = parallelize_model(
             model,
             world_mesh,
             args.model,
             args.distributed,
-            fsdp_grouping_plan=None,
+            fsdp_grouping_plan=build_fsdp_grouping_plan(args.model),
             tp_parallelize=None,
             no_recompute_ops=None,
         )
-        if args.distributed.activation_checkpointing:
-            model.gradient_checkpointing_enable()
 
         # Once we shard the model on different gpus we can actually initialize the model
         # First we create empty tensors of the correct shapes
@@ -314,7 +263,7 @@ def train(args: TrainArgs):
         # build optimizer after apply parallelisms to the model
         optimizer, scheduler = build_optimizer(model, args.optim, args.steps)
         data_loader_state = init_dataloader_state_from_args(
-            args.data, dp_rank, dp_degree
+            args.data, loader_rank, loader_degree
         )
 
         train_state = TrainState(
@@ -349,29 +298,45 @@ def train(args: TrainArgs):
             train_state.acc_step += 1
             train_state.acc_step = train_state.acc_step % args.grad_acc_steps
 
-            # get batch
-            curr_lr = float(optimizer.param_groups[0]["lr"])
-            data_load_start = timer()
-            # NOTE here should be skip for sequence parallelism
-            batch, train_state.data_loader_state = next(data_loader)
-            batch = torch.tensor(
-                batch,
-                dtype=torch.long,
-            )
-
             if every_n_steps(train_state, args.gc_collect_freq, acc_step=0):
                 logger.info("garbage collection")
                 # we do garbage collection manually otherwise different processes
                 # run the GC at different times so they slow down the whole pipeline
                 gc.collect()
-
-            input_ids = batch[:, :, 0].cuda()
+            curr_lr = float(optimizer.param_groups[0]["lr"])
+            data_load_start = timer()
+            # get batch
+            if sp_degree > 1:
+                if train_state.step % sp_degree == sp_rank:
+                    # NOTE here should be skip for sequence parallelism
+                    batch, train_state.data_loader_state = next(data_loader)
+                    batch = torch.tensor(
+                        batch,
+                        dtype=torch.long,
+                        device="cuda",
+                    )
+                    batch_list = torch.chunk(batch, sp_degree, dim=1)
+                    batch = batch_list[sp_rank]
+                    scatter(tensor=batch, scatter_list=batch_list, group=sp_group, group_src=sp_rank,)
+                else:
+                    batch = torch.empty(
+                        (args.data.batch_size, args.data.seq_len // sp_degree, args.data.n_views),
+                        dtype=torch.long,
+                        device="cuda",
+                    )
+                    scatter(tensor=batch, scatter_list=None, group=sp_group, group_src=sp_rank,)
+            else:
+                batch, train_state.data_loader_state = next(data_loader)
+                batch = torch.tensor(
+                    batch,
+                    dtype=torch.long,
+                    device="cuda",
+                )
+            input_ids = batch[:, :, 0]
             labels = input_ids
-            # labels = batch[:, :, 1].cuda()
+
             data_load_time = round(timer() - data_load_start, 4)
             nwords_since_last_log += input_ids.numel()
-
-            bsz, seqlen = labels.shape
 
             # forward
             start_timer = torch.cuda.Event(enable_timing=True)
@@ -395,12 +360,12 @@ def train(args: TrainArgs):
             # optimizer step
             grad_norm = -1.0
             if train_state.acc_step == 0:
-                # grad_norm = torch.nn.utils.clip_grad_norm_(
-                #     model.parameters(), max_norm=args.optim.clip, foreach=True
-                # )
-                grad_norm = clip_grad_norm(
+                grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=args.optim.clip, foreach=True
                 )
+                # grad_norm = clip_grad_norm(
+                #     model.parameters(), max_norm=args.optim.clip, foreach=True
+                # )
 
                 grad_norm = (
                     grad_norm.full_tensor() if isinstance(grad_norm, DTensor) else grad_norm
@@ -419,9 +384,7 @@ def train(args: TrainArgs):
 
             curr_iter_time = round(start_timer.elapsed_time(end_timer) * 1e-3, 4)
 
-            # if profiler is active
-            # if torch_profiler:
-            #     xformers.profiler.step()
+
 
             # log metrics
             if every_n_steps(
@@ -431,7 +394,7 @@ def train(args: TrainArgs):
                 acc_freq=args.logging.acc_freq,
             ):
                 time_delta = timer() - time_last_log
-                wps = nwords_since_last_log / (time_delta * args.distributed.tp_size)
+                tgs = nwords_since_last_log / (time_delta * args.distributed.tp_size * sp_degree)
 
                 gpu_mem_stats = gpu_memory_monitor.get_peak_stats()
 
@@ -444,7 +407,6 @@ def train(args: TrainArgs):
                 total_tokens = dp_degree * tokens_per_gpu
                 # This is an estimate and the correct values may change
                 # if you change the architecture
-                # Use xformer's analyze profile trace to get actual measurement
                 FLOPS = (
                     get_num_flop_per_token(
                         model_param_count - args.model.vocab_size * args.model.dim,
@@ -452,14 +414,14 @@ def train(args: TrainArgs):
                         args.model.dim,
                         args.data.seq_len,
                     )
-                    * wps
+                    * tgs
                 )
                 metrics = flatten_dict(
                     {
                         "global_step": train_state.step,
                         "acc_step": train_state.acc_step,
                         "speed": {
-                            "wps": wps,
+                            "tgs": tgs,
                             "FLOPS": FLOPS,
                             "curr_iter_time": curr_iter_time,
                             "data_load_time": data_load_time,
@@ -490,7 +452,7 @@ def train(args: TrainArgs):
                     f"  loss: {round(loss.item(),4):>7}"
                     f"  grad: {grad_norm:.2e}"
                     f"  flops: {FLOPS:.2e}"
-                    f"  wps: {wps:.2e}"
+                    f"  tgs: {tgs:.2e}"
                     f"  iter: {curr_iter_time:>7}"
                     f"  data: {data_load_time:>5}"
                     f"  lr: {curr_lr:.2e}"

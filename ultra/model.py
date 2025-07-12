@@ -1,7 +1,6 @@
 from typing import Optional, Tuple, Literal
 from dataclasses import dataclass
 
-
 @dataclass
 class BaseTransformerArgs:
 
@@ -20,22 +19,22 @@ def build_fsdp_grouping_plan(model_args: BaseTransformerArgs):
 
     if model_args.name_type == "model":
         # Grouping and output seperately
-        group_plan.append(("model.embeddings", False))
+        group_plan.append(("model.embeddings", True))
 
         # Grouping by layers
         for i in range(model_args.n_layers):
-            group_plan.append((f"model.layers.{i}", False))
+            group_plan.append((f"model.layers.{i}", True))
     elif model_args.name_type == "backbone":
         # Grouping and output seperately
-        group_plan.append(("backbone.embeddings", False))
+        group_plan.append(("backbone.embeddings", True))
 
         # Grouping by layers
         for i in range(model_args.n_layers):
-            group_plan.append((f"backbone.layers.{i}", False))
+            group_plan.append((f"backbone.layers.{i}", True))
 
     # NOTE here is a dangerous that the lm_head's forward function is not called
     # So I choose no fsdp for the output linear layer, at most cost about 2GB for 32k vocabulary
-    group_plan.append(("lm_head", False))
+    group_plan.append(("lm_head", True))
 
     return group_plan
 

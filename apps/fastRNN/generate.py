@@ -9,9 +9,9 @@ from omegaconf import OmegaConf
 import torch
 from torch import nn
 
-from lingua.args import dataclass_from_dict
-from lingua.checkpoint import CONSOLIDATE_NAME
-from lingua.tokenizer import Tokenizer, build_tokenizer
+from ultra.args import dataclass_from_dict
+from ultra.checkpoint import CONSOLIDATE_NAME
+from ultra.tokenizer import Tokenizer, build_tokenizer
 
 from apps.main.generate import (
     PackedCausalTransformerGenerator,

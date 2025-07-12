@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import torch
 import torch.nn as nn
 
-from lingua.distributed import get_is_master
+from ultra.distributed import get_is_master
 import wandb
 
 logger = logging.getLogger()

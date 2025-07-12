@@ -23,15 +23,15 @@ from torch.optim import lr_scheduler
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed._tensor import DTensor
 
-from lingua.args import dataclass_from_dict, dump_config, flatten_dict
-from lingua.checkpoint import CheckpointArgs, CheckpointManager, load_from_checkpoint
+from ultra.args import dataclass_from_dict, dump_config, flatten_dict
+from ultra.checkpoint import CheckpointArgs, CheckpointManager, load_from_checkpoint
 from apps.aunet.data.data import (
     DataArgs,
     PackTokensState,
     build_dataloader_from_args,
     init_dataloader_state_from_args,
 )
-from lingua.distributed import (
+from ultra.distributed import (
     DistributedArgs,
     EnvironmentArgs,
     init_signal_handler,
@@ -46,24 +46,24 @@ from lingua.distributed import (
     requeue_slurm_job,
     check_model_value_range,
 )
-from lingua.logger import init_logger
-from lingua.metrics import (
+from ultra.logger import init_logger
+from ultra.metrics import (
     GPUMemoryMonitor,
     LoggingArgs,
     MetricLogger,
     get_num_params,
 )
-from lingua.optim import OptimArgs, build_optimizer
-from lingua.profiling import ProfilerArgs, maybe_run_profiler
-from lingua.tokenizer import build_tokenizer
+from ultra.optim import OptimArgs, build_optimizer
+from ultra.profiling import ProfilerArgs, maybe_run_profiler
+from ultra.tokenizer import build_tokenizer
 from apps.aunet.hierarchical import (
     HierarchicalArgs,
     HierarchicalTransformer,
     build_fsdp_grouping_plan,
     get_no_recompute_ops,
 )
-from lingua.probe import AutoProbeD
-from lingua.stool import StoolArgs, launch_job
+from ultra.probe import AutoProbeD
+from ultra.stool import StoolArgs, launch_job
 
 import wandb
 

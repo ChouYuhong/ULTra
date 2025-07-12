@@ -14,10 +14,10 @@ from torch.nn import functional as F
 import xformers
 
 from apps.main.transformer import LMTransformer, LMTransformerArgs
-from lingua.args import dataclass_from_dict
-from lingua.checkpoint import CONSOLIDATE_NAME
-from lingua.tokenizer import Tokenizer, build_tokenizer
-from lingua.transformer import (
+from ultra.args import dataclass_from_dict
+from ultra.checkpoint import CONSOLIDATE_NAME
+from ultra.tokenizer import Tokenizer, build_tokenizer
+from ultra.transformer import (
     Attention,
     causal_mask,
     generate_doc_mask_mod,

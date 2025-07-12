@@ -6,7 +6,7 @@ import math
 import sys
 import time
 
-from lingua.distributed import get_global_rank, get_is_slurm_job
+from ultra.distributed import get_global_rank, get_is_slurm_job
 
 
 class LogFormatter(logging.Formatter):

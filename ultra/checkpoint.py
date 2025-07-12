@@ -30,7 +30,7 @@ from torch.distributed.checkpoint.format_utils import (
 )
 import torch.optim.optimizer
 
-from lingua.distributed import get_is_master
+from ultra.distributed import get_is_master
 
 logger = logging.getLogger("CHECKPOINT")
 
@@ -183,19 +183,16 @@ class CheckpointManager:
             dist.barrier()
         return folder
 
-    def _get_dp_tp_mesh(
+    def _get_loader_tp_mesh(
         self, device_mesh: Optional[DeviceMesh] = None
     ) -> Tuple[int, int]:
-        dp_rank = 0
+        loader_rank = 0
         tp_rank = 0
         if device_mesh is not None:
-            if "dp_replicate" in device_mesh.mesh_dim_names:
-                dp_rank = device_mesh.get_local_rank("dp_replicate")
-                if "dp_shard" in device_mesh.mesh_dim_names:
-                    dp_rank = dp_rank * device_mesh["dp_shard"].size() + device_mesh.get_local_rank("dp_shard")
+            loader_rank = device_mesh.get_local_rank("loader")
             if "tp" in device_mesh.mesh_dim_names:
                 tp_rank = device_mesh.get_local_rank("tp")
-        return dp_rank, tp_rank
+        return loader_rank, tp_rank
 
     @torch.no_grad()
     def get_state_dict(
@@ -239,9 +236,9 @@ class CheckpointManager:
                 )
 
         # Add json dump here
-        dp_rank, tp_rank = self._get_dp_tp_mesh(device_mesh)
+        loader_rank, tp_rank = self._get_loader_tp_mesh(device_mesh)
         if tp_rank == 0:
-            train_state_name = TRAIN_STATE_NAME.format(dp_rank)
+            train_state_name = TRAIN_STATE_NAME.format(loader_rank)
             logger.info(
                 f"Saving train state to: {str(curr_save_dir / train_state_name)}"
             )
@@ -266,16 +263,16 @@ class CheckpointManager:
         device_mesh: DeviceMesh,
         path: Optional[Path] = None,
     ):
-        dp_rank, tp_rank = self._get_dp_tp_mesh(device_mesh)
+        loader_rank, tp_rank = self._get_loader_tp_mesh(device_mesh)
         # Loading tries to load the provided path, if not available the last saved step and finally from the init path
-        path = path or self.get_last_step_path(dp_rank=dp_rank)
+        path = path or self.get_last_step_path(dp_rank=loader_rank)
         # If none of those are available don't do anything
         if path is None:
             # If no checkpoints exist do nothing
             return
 
         # Only load train state if it's provided, the files exist and we're not loading from init path
-        train_state_name = TRAIN_STATE_NAME.format(dp_rank)
+        train_state_name = TRAIN_STATE_NAME.format(loader_rank)
         logger.info("Reloading train state")
         with open(path / train_state_name, "r") as f:
             train_state_dict = json.load(f)

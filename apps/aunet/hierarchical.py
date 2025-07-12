@@ -14,8 +14,8 @@ from xformers.ops.fmha import AttentionBias
 
 from apps.aunet.index_matmul import IndexedMatMul
 
-from lingua.metrics import get_num_params
-from lingua.transformer import (
+from ultra.metrics import get_num_params
+from ultra.transformer import (
     RMSNorm,
     BaseTransformer, 
     BaseTransformerArgs,

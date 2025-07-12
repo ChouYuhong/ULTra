@@ -1,5 +1,5 @@
 import argparse
-from lingua.model import get_config
+from ultra.model import get_config
 
 def main():
     parser = argparse.ArgumentParser(description="Save model configuration to specified path")

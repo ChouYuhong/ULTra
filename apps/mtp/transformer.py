@@ -9,7 +9,7 @@ from torch.nn.attention.flex_attention import create_block_mask, BlockMask
 
 import torch.utils.checkpoint
 from xformers.ops import fmha, AttentionBias
-from lingua.transformer import (
+from ultra.transformer import (
     BaseTransformer,
     BaseTransformerArgs,
     RMSNorm,

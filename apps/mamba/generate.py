@@ -8,8 +8,8 @@ from omegaconf import OmegaConf
 import torch
 from torch import nn
 
-from lingua.args import dataclass_from_dict
-from lingua.tokenizer import Tokenizer
+from ultra.args import dataclass_from_dict
+from ultra.tokenizer import Tokenizer
 
 from apps.main.generate import (
     PackedCausalTransformerGenerator,

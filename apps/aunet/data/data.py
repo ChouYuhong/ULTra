@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from queue import Full
 from typing import Dict, Any, Iterator, Optional, TypedDict
-from lingua.tokenizer import build_tokenizer, TokenizerArgs
+from ultra.tokenizer import build_tokenizer, TokenizerArgs
 from apps.aunet.data.regex_cutting import RegexPool, RegexArgs, map_codepoint_to_byte
 import numpy as np
 import logging

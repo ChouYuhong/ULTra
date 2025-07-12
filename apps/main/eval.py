@@ -19,10 +19,10 @@ from apps.main.generate import (
     load_consolidated_model_and_tokenizer,
 )
 from apps.main.transformer import LMTransformer, LMTransformerArgs
-from lingua.args import dump_config
-from lingua.checkpoint import CONSOLIDATE_FOLDER, consolidate_checkpoints
-from lingua.data import init_choice_state, setup_sources
-from lingua.distributed import (
+from ultra.args import dump_config
+from ultra.checkpoint import CONSOLIDATE_FOLDER, consolidate_checkpoints
+from ultra.data import init_choice_state, setup_sources
+from ultra.distributed import (
     DistributedArgs,
     dist_mean_dict,
     get_global_rank,

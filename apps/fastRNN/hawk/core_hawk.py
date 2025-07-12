@@ -8,8 +8,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from lingua.transformer import FeedForward, InitStdFactor, RMSNorm
-from lingua.probe import log_stats
+from ultra.transformer import FeedForward, InitStdFactor, RMSNorm
+from ultra.probe import log_stats
 
 from apps.fastRNN.component.rnn_common import conv1d, scan
 
