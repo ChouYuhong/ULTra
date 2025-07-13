@@ -1,0 +1,6 @@
+*.pyc
+.vscode
+*.ipynb
+slurm-*.out
+wandb
+*private*
