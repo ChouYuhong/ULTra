@@ -190,7 +190,14 @@ def read_jsonl(
                     current_iter=current_iter,
                     load_type=load_type
                 )
-                yield json.loads(line), state
+                try:
+                    yield json.loads(line), state
+
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        f"Skipping corrupted JSON line in '{file_path}' at line {current_line}. "
+                    )
+                    continue
 
 def read_hf_dataset(
     dataset: Dataset,

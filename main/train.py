@@ -289,6 +289,14 @@ def train(args: TrainArgs):
                 state=train_state.data_loader_state,
             )
         )
+        if get_is_master():
+            # record total param
+            metric_logger.summary("model_param_count", model_param_count)
+            # record model architecture
+            model_structure_str = str(model)
+            with open(Path(args.dump_dir) / "model_structure.txt", "w") as f:
+                f.write(model_structure_str)
+            metric_logger.save(str(Path(args.dump_dir) / "model_structure.txt"))
 
         nwords_since_last_log = 0
         time_last_log = timer()

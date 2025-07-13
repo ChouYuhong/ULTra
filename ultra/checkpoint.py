@@ -128,12 +128,12 @@ class CheckpointManager:
         other_folders = []
         for p in self.existing_saves:
             is_dump = _get_key_step(p.name) % self.dump_every.every == 0
-            is_eval = _get_key_step(p.name) % self.eval_every.every == 0
+            # is_eval = _get_key_step(p.name) % self.eval_every.every == 0
             if is_dump:
                 dump_folders.append(p)
-            if is_eval:
-                eval_folders.append(p)
-            if not (is_dump or is_eval):
+            # if is_eval:
+            #     eval_folders.append(p)
+            if not (is_dump):
                 other_folders.append(p)
 
         logger.info(f"Dump folders: {dump_folders}")
@@ -142,8 +142,8 @@ class CheckpointManager:
 
         if self.dump_every.keep > 0:
             dump_folders = dump_folders[-self.dump_every.keep :]
-        if self.eval_every.keep > 0:
-            eval_folders = eval_folders[-self.eval_every.keep :]
+        # if self.eval_every.keep > 0:
+        #     eval_folders = eval_folders[-self.eval_every.keep :]
 
         folder_to_keep = set(other_folders + dump_folders + eval_folders)
         folder_to_remove = set(self.existing_saves) - folder_to_keep
@@ -286,6 +286,35 @@ class CheckpointManager:
         )
         dcp.load(state_dict, checkpoint_id=path)
         logger.info("Model and optim reloaded")
+
+        # ================================ FIX STARTS HERE ================================
+        #
+        # THE PROBLEM: After loading, the optimizer's learning rate (`optimizer.param_groups[0]['lr']`)
+        # may not be synchronized with the scheduler's state. The first `optimizer.step()`
+        # after resuming could use an incorrect (initial) learning rate, causing a deviation
+        # in the loss trajectory.
+        #
+        # THE FIX: We must manually synchronize the learning rate from the restored scheduler
+        # to the optimizer BEFORE the training loop begins.
+        # 
+        # 1. Get the correct learning rate from the scheduler.
+        #    `get_last_lr()` is a read-only method that calculates the LR based on the
+        #    scheduler's current internal state (`last_epoch`) without advancing it.
+        #    It returns a list of LRs, one for each parameter group.
+        # 2. Apply this correct learning rate to each parameter group in the optimizer.
+        #    This loop ensures correctness even if the model uses multiple parameter groups
+        #    with different learning rates.
+        current_lrs = train_state.scheduler.get_last_lr()
+        for i, param_group in enumerate(optimizer.param_groups):
+            if i < len(correct_lrs):
+                param_group['lr'] = current_lrs[i]
+            else:
+                logger.warning(
+                    f"Optimizer has more param groups ({len(optimizer.param_groups)}) "
+                    f"than the scheduler has LRs ({len(current_lrs)}). "
+                    f"Param group {i} was not updated."
+                )
+        logger.info("Set the lr to the Right value")
     
     @classmethod
     def instantiate_and_make_dir(cls, args: CheckpointArgs):
