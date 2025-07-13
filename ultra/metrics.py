@@ -79,6 +79,28 @@ class MetricLogger:
 
         metrics.update({"created_at": datetime.now(timezone.utc).isoformat()})
         print(json.dumps(metrics), file=self.jsonl_writer, flush=True)
+    
+    def summary(self, name, value):
+        if (
+            self.args is not None
+            and self.args.logging.wandb is not None
+            and (wandb.run is not None)
+        ):
+            wandb.summary[name] = value
+
+        else:
+            KeyError("No wandb summary for {name}")
+    
+    def save(self, path):
+        if (
+            self.args is not None
+            and self.args.logging.wandb is not None
+            and (wandb.run is not None)
+        ):
+            wandb.save(path)
+
+        else:
+            KeyError("No wandb save for {name}")
 
     def close(self):
         if self.jsonl_writer is not None:

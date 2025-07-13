@@ -2,7 +2,7 @@
   "bos_token_id": 1,
   "elementwise_affine": true,
   "eos_token_id": 2,
-  "fuse_cross_entropy": false,
+  "fuse_cross_entropy": true,
   "fuse_norm": true,
   "fuse_swiglu": true,
   "hidden_act": "swish",
