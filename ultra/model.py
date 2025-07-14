@@ -1,6 +1,19 @@
 from typing import Optional, Tuple, Literal
 from dataclasses import dataclass
 
+from importlib import import_module
+
+MODEL_REGISTRY = {
+    "transformer": ("fla.models", "TransformerConfig", "TransformerForCausalLM"),
+    "gla": ("fla.models", "GLAConfig", "GLAForCausalLM"),
+    "hgrn2": ("fla.models", "HGRN2Config", "HGRN2ForCausalLM"),
+    "mamba": ("fla.models", "MambaConfig", "MambaForCausalLM"),
+    "mamba2": ("fla.models", "Mamba2Config", "Mamba2ForCausalLM"),
+    "gdn": ("fla.models", "GatedDeltaNetConfig", "GatedDeltaNetForCausalLM"),
+    "neox": ("transformers", None, "AutoModelForCausalLM"),
+}
+
+
 @dataclass
 class BaseTransformerArgs:
 
@@ -69,101 +82,51 @@ def reset_rope_cache(model) -> None:
             module.reset_parameters()
 
 def load_model_from_config(model_name, config_file):
-    if model_name == "transformer":
-        from fla.models import TransformerConfig, TransformerForCausalLM
-        model = TransformerForCausalLM(TransformerConfig.from_pretrained(config_file))
-    elif model_name == "gla":
-        from fla.models import GLAForCausalLM, GLAConfig
-        model = GLAForCausalLM(GLAConfig.from_pretrained(config_file))
-    elif model_name == "hgrn2":
-        from fla.models import HGRN2ForCausalLM, HGRN2Config
-        model = HGRN2ForCausalLM(HGRN2Config.from_pretrained(config_file))
-    elif model_name == "mamba":
-        from fla.models import MambaForCausalLM, MambaConfig
-        model = MambaForCausalLM(MambaConfig.from_pretrained(config_file))
-    elif model_name == "mamba2":
-        from fla.models import Mamba2ForCausalLM, Mamba2Config
-        model = Mamba2ForCausalLM(Mamba2Config.from_pretrained(config_file))
-    elif model_name == "gdn":
-        from fla.models import GatedDeltaNetForCausalLM, GatedDeltaNetConfig
-        model = GatedDeltaNetForCausalLM(GatedDeltaNetConfig.from_pretrained(config_file))
-    elif model_name == "neox":
-        from transformers import AutoModelForCausalLM
-        from transformers.models.gpt_neox import GPTNeoXForCausalLM
-        model = AutoModelForCausalLM.from_pretrained("EleutherAI/pythia-70m-deduped",
-            revision="step3000",
-            cache_dir="./pythia-70m-deduped/step3000",
-            )
-    else:
+    if model_name not in MODEL_REGISTRY:
         raise ValueError(f"Unknown model name: {model_name}")
-    return model
+    
+    module_name, config_class_name, model_class_name = MODEL_REGISTRY[model_name]
+    module = import_module(module_name)
+
+    if model_name == "neox":
+        model_class = getattr(module, model_class_name)
+        return model_class.from_pretrained(
+            "EleutherAI/pythia-70m-deduped",
+            revision="step3000",
+            cache_dir="./pythia-70m-deduped/step3000"
+        )
+    else:
+        config_class = getattr(module, config_class_name)
+        model_class = getattr(module, model_class_name)
+        config = config_class.from_pretrained(config_file)
+        return model_class(config)
+
 
 def load_model_from_path(model_name, path):
-    if model_name == "transformer":
-        from fla.models import TransformerForCausalLM
-        model = TransformerForCausalLM.from_pretrained(path)
-    elif model_name == "gla":
-        from fla.models import GLAForCausalLM
-        model = GLAForCausalLM.from_pretrained(path)
-    elif model_name == "hgrn2":
-        from fla.models import HGRN2ForCausalLM
-        model = HGRN2ForCausalLM.from_pretrained(path)
-    elif model_name == "mamba":
-        from fla.models import MambaForCausalLM
-        model = MambaForCausalLM.from_pretrained(path)
-    elif model_name == "mamba2":
-        from fla.models import Mamba2ForCausalLM
-        model = Mamba2ForCausalLM.from_pretrained(path)
-    elif model_name == "gdn":
-        from fla.models import GatedDeltaNetForCausalLM
-        model = GatedDeltaNetForCausalLM.from_pretrained(path)
-    else:
-        raise ValueError(f"Unknown model name: {model_name}")
-    return model
+    if model_name not in MODEL_REGISTRY or model_name == "neox":
+        raise ValueError(f"Unsupported or unknown model: {model_name}")
+    
+    module_name, _, model_class_name = MODEL_REGISTRY[model_name]
+    module = import_module(module_name)
+    model_class = getattr(module, model_class_name)
+    return model_class.from_pretrained(path)
 
 
 def load_config_from_path(model_name, path):
-    if model_name == "transformer":
-        from fla.models import TransformerConfig
-        config = TransformerConfig.from_pretrained(path)
-    elif model_name == "gla":
-        from fla.models import GLAConfig
-        config = GLAConfig.from_pretrained(path)
-    elif model_name == "hgrn2":
-        from fla.models import HGRN2Config
-        config = HGRN2Config.from_pretrained(path)
-    elif model_name == "mamba":
-        from fla.models import MambaConfig
-        config = MambaConfig.from_pretrained(path)
-    elif model_name == "mamba2":
-        from fla.models import Mamba2Config
-        config = Mamba2Config.from_pretrained(path)
-    elif model_name == "gdn":
-        from fla.models import GatedDeltaNetConfig
-        config = GatedDeltaNetConfig.from_pretrained(path)
-    else:
-        raise ValueError(f"Unknown model name: {model_name}")
-    return config
+    if model_name not in MODEL_REGISTRY or MODEL_REGISTRY[model_name][1] is None:
+        raise ValueError(f"Unsupported or unknown model: {model_name}")
+    
+    module_name, config_class_name, _ = MODEL_REGISTRY[model_name]
+    module = import_module(module_name)
+    config_class = getattr(module, config_class_name)
+    return config_class.from_pretrained(path)
+
 
 def get_config(model_name):
-    if model_name == "transformer":
-        from fla.models import TransformerConfig
-        config = TransformerConfig()
-    elif model_name == "gla":
-        from fla.models import GLAConfig
-        config = GLAConfig()
-    elif model_name == "hgrn2":
-        from fla.models import HGRN2Config
-        config = HGRN2Config()
-    elif model_name == "mamba":
-        from fla.models import MambaConfig
-        config = MambaConfig()
-    elif model_name == "mamba2":
-        from fla.models import Mamba2Config
-        config = Mamba2Config()
-    elif model_name == "gdn":
-        from fla.models import GatedDeltaNetConfig
-        config = GatedDeltaNetConfig()
-    else:
-        raise ValueError(f"Unknown model name: {model_name}")
-    return config
+    if model_name not in MODEL_REGISTRY or MODEL_REGISTRY[model_name][1] is None:
+        raise ValueError(f"Unsupported or unknown model: {model_name}")
+    
+    module_name, config_class_name, _ = MODEL_REGISTRY[model_name]
+    module = import_module(module_name)
+    config_class = getattr(module, config_class_name)
+    return config_class()
