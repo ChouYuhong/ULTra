@@ -130,15 +130,14 @@ def validate_train_args(args: TrainArgs, output_size: int):
         args.distributed.dp_replicate
         * args.distributed.dp_shard
         * args.distributed.tp_size
-        * args.distributed.sp_replicate
-        * args.distributed.sp_shard
+        * args.distributed.sp_size
         == get_world_size()
     ), "DP * TP * SP should be equal to world size"
 
     if args.distributed.fsdp_type == "no_shard":
         assert (
-            args.distributed.dp_shard * args.distributed.sp_shard == 1
-            and args.distributed.dp_replicate * args.distributed.sp_replicate == get_world_size()
+            args.distributed.dp_shard * args.distributed.sp_size == 1
+            and args.distributed.dp_replicate * args.distributed.sp_size == get_world_size()
         )
 
     args.model.max_seqlen = args.data.seq_len
@@ -163,18 +162,14 @@ def verify_world_mesh(
         dp_rank = dp_rank * world_mesh["dp_shard"].size() + world_mesh["dp_shard"].get_local_rank()
         dp_degree *= world_mesh["dp_shard"].size()
     
-    sp_mesh = world_mesh["sp_replicate"]
+    sp_mesh = world_mesh["sp"]
     sp_degree = sp_mesh.size()
     sp_rank = sp_mesh.get_local_rank()
-    if distributed_args.sp_shard > 1:
-        sp_rank = sp_rank * world_mesh["sp_shard"].size() + world_mesh["sp_shard"].get_local_rank()
-        sp_degree *= world_mesh["sp_shard"].size()
     
     dp_group = world_mesh["dp"].get_group()
     assert dp_rank == dist.get_rank(group=dp_group)
-    sp_group = world_mesh["sp"].get_group()
-    assert sp_rank == dist.get_rank(group=sp_group)
     logger.info(f"Running on sp rank : {sp_rank}")
+    logger.info(f"Running on sp size : {sp_degree}")
 
     logger.info(f"Running on dp rank : {dp_rank}")
     logger.info(f"Running on dp size : {dp_degree}")
@@ -298,6 +293,7 @@ def train(args: TrainArgs):
                 f.write(model_structure_str)
             metric_logger.save(str(Path(args.dump_dir) / "model_structure.txt"))
 
+        sp_group = world_mesh["sp"].get_group()
         nwords_since_last_log = 0
         time_last_log = timer()
         gc.collect()
@@ -315,7 +311,7 @@ def train(args: TrainArgs):
             data_load_start = timer()
             # get batch
             if sp_degree > 1:
-                batch, train_state.data_loader_state = sp_dataloader(train_state.step, sp_rank, sp_degree, train_state.data_loader_state, args.data, data_loader)
+                batch, train_state.data_loader_state = sp_dataloader(train_state.step, sp_group, sp_rank, sp_degree, train_state.data_loader_state, args.data, data_loader)
             else:
                 batch, train_state.data_loader_state = next(data_loader)
                 batch = torch.tensor(

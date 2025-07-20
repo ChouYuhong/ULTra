@@ -44,8 +44,7 @@ logger.setLevel(logging.INFO)
 class DistributedArgs:
     dp_shard: int = 1
     dp_replicate: int = 1  
-    sp_shard: int = 1
-    sp_replicate: int = 1
+    sp_size: int = 1
     tp_size: int = 1
 
     activation_checkpointing: bool = False
@@ -88,15 +87,14 @@ def get_device_mesh(distributed_args: DistributedArgs):
     
     tp_size = distributed_args.tp_size
     dp_replicate = distributed_args.dp_replicate
-    sp_replicate = distributed_args.sp_replicate
     dp_shard = distributed_args.dp_shard
-    sp_shard = distributed_args.sp_shard
+    sp_size = distributed_args.sp_size
 
     assert tp_size == 1, "we currently do not support tp, tobe done soon"
 
     assert (
-        dp_shard * dp_replicate * sp_shard * sp_replicate * tp_size == get_world_size()
-    ), f"dp_shard * dp_replicate * sp_shard * sp_replicate * tp_size ({dp_shard} * {dp_replicate} * {sp_shard} * {sp_replicate} * {tp_size}) != world_size ({get_world_size()})"
+        dp_shard * dp_replicate * sp_size * tp_size == get_world_size()
+    ), f"dp_shard * dp_replicate * sp_size * tp_size ({dp_shard} * {dp_replicate} * {sp_size} * {tp_size}) != world_size ({get_world_size()})"
 
     dims = []
     names = []
@@ -105,15 +103,12 @@ def get_device_mesh(distributed_args: DistributedArgs):
     if dp_replicate >= 1:
         dims.append(dp_replicate)
         names.append("dp_replicate")
-    if sp_replicate >= 1:
-        dims.append(sp_replicate)
-        names.append("sp_replicate")
     if dp_shard >= 1 or distributed_args.fsdp_type == "no_shard":
         dims.append(dp_shard)
         names.append("dp_shard")
-    if sp_shard >= 1 or distributed_args.fsdp_type == "no_shard":
-        dims.append(sp_shard)
-        names.append("sp_shard")
+    if sp_size >= 1:
+        dims.append(sp_size)
+        names.append("sp")
     if tp_size > 1:
         dims.append(tp_size)
         names.append("tp")
@@ -123,14 +118,14 @@ def get_device_mesh(distributed_args: DistributedArgs):
 
     device_mesh = init_device_mesh("cuda", mesh_shape=dims, mesh_dim_names=names)
 
-    
+    # 保存扁平化后的子网格回 device_mesh
+
+
     # NOTE prepare dp, sp mesh
-    device_mesh[tuple(["dp_replicate", "dp_shard"])]._flatten(mesh_dim_name="dp")
-    device_mesh[tuple(["sp_replicate", "sp_shard"])]._flatten(mesh_dim_name="sp")
-    device_mesh[tuple(["dp_replicate", "sp_replicate", "dp_shard", "sp_shard"])]._flatten(mesh_dim_name="loader")
-    # NOTE prepare fsdp mesh
-    device_mesh[tuple(["dp_replicate", "sp_replicate"])]._flatten(mesh_dim_name="replicate")
-    device_mesh[tuple(["dp_shard", "sp_shard"])]._flatten(mesh_dim_name="shard")
+    device_mesh[tuple(["dp_replicate", "dp_shard"])]._flatten(mesh_dim_name="dp") # dp dim
+    device_mesh[tuple(["dp_replicate", "dp_shard", "sp"])]._flatten(mesh_dim_name="loader") # dataloader dim
+
+    device_mesh[tuple(["dp_shard", "sp"])]._flatten(mesh_dim_name="shard") # shard dim for HSDP
 
     return device_mesh
 
@@ -393,11 +388,11 @@ def parallelize_model(
                 device_mesh["dp_shard"].size() == 1
             ), "dp_shard must be 1 for no_shard fsdp_type"
             assert (
-                distributed_args.sp_shard == 1
-            ), "dp_shard must be 1 for no_shard fsdp_type"
+                distributed_args.sp_size == 1
+            ), "sp size must be 1 for no_shard fsdp_type"
             assert (
-                device_mesh["sp_shard"].size() == 1
-            ), "dp_shard must be 1 for no_shard fsdp_type"
+                device_mesh["sp"].size() == 1
+            ), "sp size must be 1 for no_shard fsdp_type"
 
         fsdp_config = dict(
             mp_policy=(
@@ -407,10 +402,10 @@ def parallelize_model(
                 )
             ),
             mesh=(
-                device_mesh["replicate", "shard"]
-                if distributed_args.dp_shard * distributed_args.sp_shard > 1
+                device_mesh["dp_replicate", "shard"]
+                if distributed_args.dp_shard * distributed_args.sp_size > 1
                 or distributed_args.fsdp_type == "no_shard"
-                else device_mesh["replicate"]
+                else device_mesh["dp_replicate"]
             ),
         )
 
@@ -437,7 +432,7 @@ def parallelize_model(
 
     return model
 
-def sp_dataloader(step, sp_rank, sp_degree, data_loader_state, data_args, data_loader):
+def sp_dataloader(step, sp_group, sp_rank, sp_degree, data_loader_state, data_args, data_loader):
     if step % sp_degree == sp_rank:
         # NOTE here should be skip for sequence parallelism
         batch, data_loader_state = next(data_loader)
