@@ -10,6 +10,7 @@ MODEL_REGISTRY = {
     "mamba": ("fla.models", "MambaConfig", "MambaForCausalLM"),
     "mamba2": ("fla.models", "Mamba2Config", "Mamba2ForCausalLM"),
     "gdn": ("fla.models", "GatedDeltaNetConfig", "GatedDeltaNetForCausalLM"),
+    "mistral": ("ultra.modeling.mistral", "MistralConfig", "MistralForCausalLM"),
     "neox": ("transformers", None, "AutoModelForCausalLM"),
 }
 
@@ -25,6 +26,7 @@ class BaseTransformerArgs:
     n_layers: int = 8
     max_seqlen: int = 2048 # will be set by data.seqlen
     vocab_size: int = 32000
+    meta_init: bool = True
 
 # Optional and only used for fully shard options (fsdp) is choose. Highly recommanded for large models
 def build_fsdp_grouping_plan(model_args: BaseTransformerArgs):
@@ -77,8 +79,11 @@ def reset_rope_cache(model) -> None:
         model: PyTorch model to traverse
     """
     from fla.modules.rotary import RotaryEmbedding
+    from ultra.modeling.mistral.modeling_mistral import MistralRotaryEmbedding
     for name, module in model.named_modules():
         if isinstance(module, RotaryEmbedding):
+            module.reset_parameters()
+        elif isinstance(module, MistralRotaryEmbedding):
             module.reset_parameters()
 
 def load_model_from_config(model_name, config_file):
