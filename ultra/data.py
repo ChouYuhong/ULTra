@@ -6,7 +6,7 @@ from functools import partial
 import json
 from dataclasses import dataclass, field
 from datasets import load_from_disk, load_dataset
-from datasets import Dataset
+from datasets import Dataset, IterableDataset
 from multiprocessing import Process, Queue, Event
 from queue import Full, Empty
 from multiprocessing.synchronize import Event as EventClass
@@ -285,7 +285,7 @@ def loop_on_hf_dataset(
 ):
     """Makes the block jsonl iterator infinite and updates n_iter counter"""
     if load_type == "load_dataset":
-        dataset = load_dataset(file_path, split="train", keep_in_memory=False, num_proc=16)
+        dataset = load_dataset(file_path, split="train[:30%]", keep_in_memory=False, num_proc=16)
     elif load_type == "load_from_disk":
         dataset = load_from_disk(file_path)
     else:
