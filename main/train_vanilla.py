@@ -24,7 +24,7 @@ from torch.distributed._tensor import DTensor
 
 from ultra.args import dataclass_from_dict, dump_config, flatten_dict
 from ultra.checkpoint import CheckpointArgs, CheckpointManager, load_from_checkpoint
-from ultra.data import (
+from ultra.data_vanilla import (
     DataArgs,
     PackTokensState,
     build_dataloader_from_args,

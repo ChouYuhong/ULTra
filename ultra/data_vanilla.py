@@ -5,8 +5,6 @@ from copy import deepcopy
 from functools import partial
 import json
 from dataclasses import dataclass, field
-from datasets import load_from_disk, load_dataset
-from datasets import Dataset, IterableDataset
 from multiprocessing import Process, Queue, Event
 from queue import Full, Empty
 from multiprocessing.synchronize import Event as EventClass
@@ -61,7 +59,7 @@ build_seperate_token_packing_dataloader does the same thing but swaps step 2 and
 Both can be called with a resume_state to resume from any given position deterministically
 """
 
-TRAIN_DATA_FILE_PATTERN = "*chunk.*.jsonl"
+TRAIN_DATA_FILE_PATTERN = "*.chunk.*.jsonl"
 
 class JSONLState(TypedDict):
     """Represents the current state of a JSON line reader.
@@ -80,8 +78,6 @@ class JSONLState(TypedDict):
     block_size: int
     offset: int
     current_iter: int
-    # NOTE add load_type: [load_dataset, load_from_disk]
-    load_type: str
 
 
 class MultiChoiceState(TypedDict):
@@ -139,13 +135,13 @@ class PrefetchState(TypedDict):
     prefetch_size: int
     batch_size: int
 
+
 def read_jsonl(
     file_path: str,
     position: int,
     block_size: int,
     offset: int,
     current_iter: int,
-    load_type: str
 ):
     """Iterates over a JSON Lines file, yielding a line every `block_size` lines with an offset
 
@@ -173,7 +169,6 @@ def read_jsonl(
         block_size=block_size,
         offset=offset,
         current_iter=current_iter,
-        load_type=load_type
     )
     with open(file_path, "r") as file:
         file.seek(position)
@@ -188,72 +183,9 @@ def read_jsonl(
                     block_size=block_size,
                     offset=offset,
                     current_iter=current_iter,
-                    load_type=load_type
                 )
-                try:
-                    yield json.loads(line), state
+                yield json.loads(line), state
 
-                except json.JSONDecodeError as e:
-                    logger.warning(
-                        f"Skipping corrupted JSON line in '{file_path}' at line {current_line}. "
-                    )
-                    continue
-
-def read_hf_dataset(
-    dataset: Dataset,
-    file_path: str,
-    position: int,
-    block_size: int,
-    offset: int,
-    current_iter: int,
-    load_type: str,
-):
-    """Iterates over a JSON Lines file, yielding a line every `block_size` lines with an offset
-
-    Example : If block_size = 3, offset = 1, iterator will yield lines 1 4 7 10 ...
-    Example : If block_size = 2, offset = 0, iterator will yield lines 0 2 4 6 ...
-
-    Args:
-        file_path (str): Path to the JSONL file.
-        position (int): The file position (in bytes) from which to start reading.
-        block_size (int): The number of lines to skip between yields
-        offset (int): The initial number of lines skiped
-
-    Yields:
-        JSONLState: Represents the state of each line read according to window and offset.
-    """
-    
-    if (offset < 0) or (offset >= block_size):
-        raise RuntimeError(f"JSONL iterator offset value is invalid")
-    # We assume the start position is either 0 or given by the last line yielded
-    # Therefore the current line is right after the offset (modulo block_size)
-    current_line = position
-    length = len(dataset)
-
-    state = JSONLState(
-        file_path=file_path,
-        position=position,
-        block_size=block_size,
-        offset=offset,
-        current_iter=current_iter,
-        load_type=load_type,
-    )
-
-    while (current_line < length):
-        data = dataset[current_line]
-        current_line += 1
-        if (current_line - 1) % block_size == offset:
-            # We return state that will allow resuming from this position
-            # We update state for next position
-            state = JSONLState(
-                file_path=file_path,
-                position=current_line,
-                block_size=block_size,
-                offset=offset,
-                current_iter=current_iter,
-                load_type=load_type,
-            )
-            yield data, state
 
 def loop_on_jsonl(
     file_path: str,
@@ -261,13 +193,11 @@ def loop_on_jsonl(
     block_size: int,
     offset: int,
     current_iter: int,
-    load_type: str
 ):
     """Makes the block jsonl iterator infinite and updates n_iter counter"""
-    assert load_type == "jsonl", "load_type must be 'jsonl'"
     try:
         while True:
-            it = read_jsonl(file_path, position, block_size, offset, current_iter, load_type=load_type)
+            it = read_jsonl(file_path, position, block_size, offset, current_iter)
             for content, jsonl_state in it:
                 yield content, jsonl_state
             current_iter += 1
@@ -275,35 +205,6 @@ def loop_on_jsonl(
     finally:
         it.close()
 
-def loop_on_hf_dataset(
-    file_path: str,
-    position: int,
-    block_size: int,
-    offset: int,
-    current_iter: int,
-    load_type: str
-):
-    """Makes the block jsonl iterator infinite and updates n_iter counter"""
-    if load_type == "load_dataset":
-        if file_path == "HuggingFaceFW/fineweb-edu/sample-350BT":
-            dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-350BT", split="train")
-        elif file_path == "HuggingFaceFW/fineweb-edu/part":
-            dataset = load_dataset("HuggingFaceFW/fineweb-edu", name='default', split="train[:30%]")
-        else:
-            dataset = load_dataset(file_path, split="train")
-    elif load_type == "load_from_disk":
-        dataset = load_from_disk(file_path)
-    else:
-        raise NotImplementedError(f"load_type {load_type} not implemented")
-    try:
-        while True:
-            it = read_hf_dataset(dataset, file_path, position, block_size, offset, current_iter, load_type)
-            for content, jsonl_state in it:
-                yield content, jsonl_state
-            current_iter += 1
-            position = 0
-    finally:
-        it.close()
 
 def tokenize(
     iterator: Iterator,
@@ -589,52 +490,20 @@ def distribute_data_to_rank(dataset_path: str, rank: int, world_size: int, file_
     Otherwise, world_size is assumed to be a multiple of number of chunks.
     In that case there are world_size//nb_chunks workers on each chunk file, reading with different offsets.
     """
-    
-
-    # return rank_to_jsonl_iterator_params[rank]
-    def parse_dataset_path(dataset_path):
-        """
-        Given a string in the format "load_type:data_path",
-        returns (load_type, data_path).
-        """
-        parts = dataset_path.split(".", 1)
-        if len(parts) != 2:
-            raise ValueError(f"Invalid dataset_path format: {dataset_path}")
-        load_type, data_path = parts
-        return load_type, data_path
-    load_type, data_path = parse_dataset_path(dataset_path)
-
-    if load_type != "jsonl":
-        n_ranks_per_chunk = world_size
-        rank_to_jsonl_iterator_params = []
-        
+    dataset_chunks = find_and_sanitize_chunks(dataset_path, world_size, file_pattern)
+    n_ranks_per_chunk = world_size // len(dataset_chunks)
+    rank_to_jsonl_iterator_params = []
+    for chunk_path in dataset_chunks:
         for i in range(n_ranks_per_chunk):
             rank_to_jsonl_iterator_params.append(
                 JSONLState(
-                    file_path=data_path,
+                    file_path=chunk_path,
                     position=0,
                     block_size=n_ranks_per_chunk,
                     offset=i,
                     current_iter=0,
-                    load_type=load_type
                 )
             )
-    else:
-        dataset_chunks = find_and_sanitize_chunks(data_path, world_size, file_pattern)
-        n_ranks_per_chunk = world_size // len(dataset_chunks)
-        rank_to_jsonl_iterator_params = []
-        for chunk_path in dataset_chunks:
-            for i in range(n_ranks_per_chunk):
-                rank_to_jsonl_iterator_params.append(
-                    JSONLState(
-                        file_path=chunk_path,
-                        position=0,
-                        block_size=n_ranks_per_chunk,
-                        offset=i,
-                        current_iter=0,
-                        load_type=load_type
-                    )
-                )
 
     return rank_to_jsonl_iterator_params[rank]
 
@@ -650,7 +519,7 @@ def init_choice_state(
     data_path_to_jsonl_state = dict()
     for dataset_path in sources:
         jsonl_state = distribute_data_to_rank(
-            dataset_path, rank, world_size, file_pattern
+            os.path.join(root_dir, dataset_path), rank, world_size, file_pattern
         )
         data_path_to_jsonl_state[dataset_path] = jsonl_state
 
@@ -713,30 +582,18 @@ def init_state(
         prefetch_size=prefetch_size,
     )
 
-# NOTE add multi version of data load: jsonl, load_dataset, load_from_disk
+
 def setup_sources(multi_state):
     path_to_iter = dict()
     for source in multi_state["sources"]:
         jsonl_state = multi_state["source_to_state"][source]
-
-        if jsonl_state["load_type"] == "jsonl":
-            path_to_iter[source] = loop_on_jsonl(
-                jsonl_state["file_path"],
-                jsonl_state["position"],
-                jsonl_state["block_size"],
-                jsonl_state["offset"],
-                jsonl_state["current_iter"],
-                jsonl_state["load_type"]
-            )
-        else:
-            path_to_iter[source] = loop_on_hf_dataset(
-                jsonl_state["file_path"],
-                jsonl_state["position"],
-                jsonl_state["block_size"],
-                jsonl_state["offset"],
-                jsonl_state["current_iter"],
-                jsonl_state["load_type"]
-            )
+        path_to_iter[source] = loop_on_jsonl(
+            jsonl_state["file_path"],
+            jsonl_state["position"],
+            jsonl_state["block_size"],
+            jsonl_state["offset"],
+            jsonl_state["current_iter"],
+        )
 
     return path_to_iter
 
@@ -852,7 +709,7 @@ def async_iterator(buffer_size: int, iterator_builder):
 
 @dataclass
 class DataArgs:
-    root_dir: Optional[str] = None
+    root_dir: Optional[str] = "/"
     sources: Dict[str, float] = field(default_factory=dict)
     batch_size: int = 2
     seq_len: int = 2048
