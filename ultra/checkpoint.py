@@ -306,7 +306,7 @@ class CheckpointManager:
         #    with different learning rates.
         current_lrs = train_state.scheduler.get_last_lr()
         for i, param_group in enumerate(optimizer.param_groups):
-            if i < len(correct_lrs):
+            if i < len(current_lrs):
                 param_group['lr'] = current_lrs[i]
             else:
                 logger.warning(
