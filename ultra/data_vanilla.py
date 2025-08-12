@@ -59,7 +59,7 @@ build_seperate_token_packing_dataloader does the same thing but swaps step 2 and
 Both can be called with a resume_state to resume from any given position deterministically
 """
 
-TRAIN_DATA_FILE_PATTERN = "*.chunk.*.jsonl"
+TRAIN_DATA_FILE_PATTERN = "*chunk.*.jsonl"
 
 class JSONLState(TypedDict):
     """Represents the current state of a JSON line reader.
@@ -184,7 +184,14 @@ def read_jsonl(
                     offset=offset,
                     current_iter=current_iter,
                 )
-                yield json.loads(line), state
+                try:
+                    yield json.loads(line), state
+
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        f"Skipping corrupted JSON line in '{file_path}' at line {current_line}. "
+                    )
+                    continue
 
 
 def loop_on_jsonl(
