@@ -24,7 +24,7 @@ from torch.distributed._tensor import DTensor
 
 from ultra.args import dataclass_from_dict, dump_config, flatten_dict
 from ultra.checkpoint import CheckpointArgs, CheckpointManager, load_from_checkpoint
-from ultra.data import (
+from ultra.data_vanilla import (
     DataArgs,
     PackTokensState,
     build_dataloader_from_args,
@@ -71,7 +71,6 @@ class TrainArgs:
     dump_dir: str = ""
 
     seed: int = 42
-    varlen: bool = False
 
     # Number of gradient accumulation steps
     # Total batch size is batch_size*grad_acc_steps
@@ -191,13 +190,6 @@ def every_n_steps(train_state, freq, acc_step=None, acc_freq=None):
         test = test and ((train_state.acc_step % acc_freq) == 0)
     return test
 
-def calculate_cu_seqlens(input_ids, eos_id):
-    length = input_ids.shape[1]
-    cu_seqlens = torch.cat((torch.tensor([0], device=input_ids.device), (input_ids == eos_id).nonzero(as_tuple=True)[1]))
-    cu_seqlens = torch.cat((cu_seqlens, torch.tensor([length], device=input_ids.device)))
-    cu_seqlens = cu_seqlens.unique().contiguous()
-    max_len = torch.diff(torch.cat((cu_seqlens, torch.tensor([length], device=input_ids.device)))).max()
-    return cu_seqlens.to(torch.int32), max_len
 
 def train(args: TrainArgs):
     with ExitStack() as context_stack:
@@ -308,7 +300,6 @@ def train(args: TrainArgs):
             metric_logger.save(str(Path(args.dump_dir) / "model_structure.txt"))
 
         sp_group = world_mesh["sp"].get_group()
-        eos_id = tokenizer.eos_id
         nwords_since_last_log = 0
         time_last_log = timer()
         gc.collect()
@@ -345,11 +336,7 @@ def train(args: TrainArgs):
             end_timer = torch.cuda.Event(enable_timing=True)
             start_timer.record()
 
-            if args.varlen:
-                cu_seqlens, _ = calculate_cu_seqlens(input_ids, eos_id)
-                output = model(input_ids=input_ids, labels=labels, cu_seqlens=cu_seqlens)
-            else:
-                output = model(input_ids=input_ids, labels=labels)
+            output = model(input_ids=input_ids, labels=labels)
             loss = output.loss
 
             if args.grad_acc_steps > 1:

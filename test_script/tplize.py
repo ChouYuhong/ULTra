@@ -17,7 +17,7 @@ from functools import partial
 from fla.modules.layernorm import rms_norm, RMSNorm
 from typing import Any, Optional, Union
 from torch.distributed.tensor.placement_types import Placement
-
+from torch.nn import RMSNorm
 class RMSNormTP(nn.Module):
 
     def __init__(
