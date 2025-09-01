@@ -15,7 +15,7 @@ logger = logging.getLogger()
 class OptimArgs:
     lr: float = 3e-4
     weight_decay: float = 0.1
-    epsilon: float = 1e-8
+    epsilon: float = 1e-12
     beta1: float = 0.9
     beta2: float = 0.95
     clip: float = 1.0
