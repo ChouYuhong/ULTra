@@ -63,7 +63,7 @@ if __name__ == "__main__":
     rank, world_size, local_rank = setup_distributed()
     
     dataset = StreamingDataset(
-        local="",
+        local="/mnt/bn/tiktok-mm-5/aiic/users/CHOU_Yuhong/data/mds_fineweb_edu",
         batch_size=1,
         shuffle=True,
         shuffle_seed=42,
@@ -75,6 +75,12 @@ if __name__ == "__main__":
     count = 0
     
     load_dataloader_state(dataloader, "./ckpt/", rank)
+
+    import pdb
+    print(len(dataloader))
+    if dist.get_rank() == 0:
+        pdb.set_trace()
+    dist.barrier()
     
     for data in dataloader:
         strs = data["text"][0][:10]

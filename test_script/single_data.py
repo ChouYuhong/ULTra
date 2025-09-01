@@ -11,7 +11,7 @@ import pdb
 
 if __name__ == "__main__":
     dataset = StreamingDataset(
-        local="",
+        local="/mnt/bn/tiktok-mm-5/aiic/users/CHOU_Yuhong/data/mds_fineweb_edu",
         batch_size=1)
     dataloader = StreamingDataLoader(dataset, batch_size=1)
     for data in dataloader:

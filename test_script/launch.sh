@@ -4,4 +4,4 @@ torchrun --nproc_per_node=8 \
         --node_rank=$ARNOLD_ID \
         --master_addr=$ARNOLD_WORKER_0_HOST \
         --master_port=${ARNOLD_WORKER_0_PORT%%,*} \
-        dataset_test.py
+        ./test_script/model_to_ulysses.py

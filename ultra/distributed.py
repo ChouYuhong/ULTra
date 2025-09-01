@@ -21,7 +21,7 @@ from datetime import timedelta
 import torch
 from torch.distributed import ReduceOp
 from torch import distributed as dist
-from torch.distributed import scatter
+from torch.distributed import scatter, broadcast
 from torch.distributed._tensor import DTensor
 from torch.distributed._composable.fsdp import MixedPrecisionPolicy, fully_shard
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -432,7 +432,8 @@ def parallelize_model(
 
     return model
 
-def sp_dataloader(step, sp_group, sp_rank, sp_degree, data_loader_state, data_args, data_loader):
+def sp_dataloader(step, sp_group, sp_rank, sp_degree, data_loader_state, data_args, data_loader, varlen, eos_id):
+    cu_seqlens = None
     if step % sp_degree == sp_rank:
         # NOTE here should be skip for sequence parallelism
         batch, data_loader_state = next(data_loader)
@@ -441,14 +442,27 @@ def sp_dataloader(step, sp_group, sp_rank, sp_degree, data_loader_state, data_ar
             dtype=torch.long,
             device="cuda",
         )
-        batch_list = torch.chunk(batch, sp_degree, dim=1)
-        batch = batch_list[sp_rank]
-        scatter(tensor=batch, scatter_list=batch_list, group=sp_group, group_src=sp_rank,)
+        broadcast(tensor=batch, group=sp_group, group_src=sp_rank)
+        batch_list = [x.contiguous() for x in torch.chunk(batch, sp_degree, dim=1)]
+        return_batch = batch_list[sp_rank]
     else:
         batch = torch.empty(
-            (data_args.batch_size, data_args.seq_len // sp_degree, data_args.n_views),
+            (data_args.batch_size, data_args.seq_len, data_args.n_views),
             dtype=torch.long,
             device="cuda",
         )
-        scatter(tensor=batch, scatter_list=None, group=sp_group, group_src=sp_rank,)
-    return batch, data_loader_state
+        broadcast(tensor=batch, group=sp_group, group_src=(step % sp_degree),)
+        batch_list = [x.contiguous() for x in torch.chunk(batch, sp_degree, dim=1)]
+        return_batch = batch_list[sp_rank]
+    if varlen:
+        cu_seqlens, _ = calculate_cu_seqlens(batch[:, :, 0], eos_id)
+
+    return return_batch, data_loader_state, cu_seqlens
+
+def calculate_cu_seqlens(input_ids, eos_id):
+    length = input_ids.shape[1]
+    cu_seqlens = torch.cat((torch.tensor([0], device=input_ids.device), (input_ids == eos_id).nonzero(as_tuple=True)[1]))
+    cu_seqlens = torch.cat((cu_seqlens, torch.tensor([length], device=input_ids.device)))
+    cu_seqlens = cu_seqlens.unique().contiguous()
+    max_len = torch.diff(torch.cat((cu_seqlens, torch.tensor([length], device=input_ids.device)))).max()
+    return cu_seqlens.to(torch.int32), max_len

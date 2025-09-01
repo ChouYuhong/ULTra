@@ -76,7 +76,7 @@ class JSONLState(TypedDict):
     """
 
     file_path: str
-    position: int
+    position: Any
     block_size: int
     offset: int
     current_iter: int
@@ -290,7 +290,7 @@ def loop_on_hf_dataset(
         elif file_path == "HuggingFaceFW/fineweb-edu/part":
             dataset = load_dataset("HuggingFaceFW/fineweb-edu", name='default', split="train[:30%]")
         else:
-            dataset = load_dataset(file_path, split="train")
+            dataset = load_dataset(file_path, name='default', split="train")
     elif load_type == "load_from_disk":
         dataset = load_from_disk(file_path)
     else:

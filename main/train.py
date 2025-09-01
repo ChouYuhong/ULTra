@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import time
+import math
 from contextlib import ExitStack
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -42,6 +43,7 @@ from ultra.distributed import (
     setup_torch_distributed,
     check_model_value_range,
     sp_dataloader,
+    calculate_cu_seqlens,
 )
 from ultra.logger import init_logger
 from ultra.metrics import (
@@ -57,9 +59,11 @@ from ultra.model import (
     reinit_weights,
     reset_rope_cache,
     load_model_from_config,
+    load_model_from_path,
     get_num_flop_per_token,
     build_fsdp_grouping_plan,
 )
+from safetensors.torch import load_file as load_safetensors_file
 
 import wandb
 logging.basicConfig(level=logging.INFO)
@@ -191,13 +195,6 @@ def every_n_steps(train_state, freq, acc_step=None, acc_freq=None):
         test = test and ((train_state.acc_step % acc_freq) == 0)
     return test
 
-def calculate_cu_seqlens(input_ids, eos_id):
-    length = input_ids.shape[1]
-    cu_seqlens = torch.cat((torch.tensor([0], device=input_ids.device), (input_ids == eos_id).nonzero(as_tuple=True)[1]))
-    cu_seqlens = torch.cat((cu_seqlens, torch.tensor([length], device=input_ids.device)))
-    cu_seqlens = cu_seqlens.unique().contiguous()
-    max_len = torch.diff(torch.cat((cu_seqlens, torch.tensor([length], device=input_ids.device)))).max()
-    return cu_seqlens.to(torch.int32), max_len
 
 def train(args: TrainArgs):
     with ExitStack() as context_stack:
@@ -227,7 +224,22 @@ def train(args: TrainArgs):
             with torch.device("meta"):
                 model = load_model_from_config(args.model.model_name, args.model.config_path)
         else:
-            model = load_model_from_config(args.model.model_name, args.model.config_path)
+            model = load_model_from_config(args.model.model_name, args.model.config_path).to("cuda")
+
+        
+        if sp_degree > 1:
+            sp_group = world_mesh["sp"].get_group()
+            # NOTE we setup the ulysses sequence parallelism
+            # we change the aattention layer to ulysses version attention layer
+            from easysp.ulysses_layers import ulysseslize
+            ulysseslize(model, sp_group)
+            logger.info("Model Sequence Parallelism is built !")
+        
+        if not args.model.meta_init and args.checkpoint.init_ckpt_path:
+            model_load = load_model_from_path(args.model.model_name, args.checkpoint.init_ckpt_path).to("cuda")
+            state_dict = model_load.state_dict()
+            model.load_state_dict(state_dict, strict=True)
+
             
         logger.info("Model is built !")
 
@@ -244,9 +256,10 @@ def train(args: TrainArgs):
         )
         if args.model.meta_init:
             model = model.to_empty(device="cuda")
+        
 
         # NOTE the key point here is that we need to find a distributed checkpoint loading
-        if args.checkpoint.init_ckpt_path:
+        if args.checkpoint.init_ckpt_path and args.model.meta_init:
             logger.info(f"Loading initial model from {args.checkpoint.init_ckpt_path}")
             load_from_checkpoint(args.checkpoint.init_ckpt_path, model, model_key="model") # Put model_key="" if its directly the model checkpoint
             reset_rope_cache(model) # For RoPe initialization since it's a buffer it might not be loaded
@@ -307,7 +320,7 @@ def train(args: TrainArgs):
                 f.write(model_structure_str)
             metric_logger.save(str(Path(args.dump_dir) / "model_structure.txt"))
 
-        sp_group = world_mesh["sp"].get_group()
+        
         eos_id = tokenizer.eos_id
         nwords_since_last_log = 0
         time_last_log = timer()
@@ -326,7 +339,7 @@ def train(args: TrainArgs):
             data_load_start = timer()
             # get batch
             if sp_degree > 1:
-                batch, train_state.data_loader_state = sp_dataloader(train_state.step, sp_group, sp_rank, sp_degree, train_state.data_loader_state, args.data, data_loader)
+                batch, train_state.data_loader_state, cu_seqlens = sp_dataloader(train_state.step, sp_group, sp_rank, sp_degree, train_state.data_loader_state, args.data, data_loader, args.varlen, eos_id)
             else:
                 batch, train_state.data_loader_state = next(data_loader)
                 batch = torch.tensor(
@@ -334,8 +347,14 @@ def train(args: TrainArgs):
                     dtype=torch.long,
                     device="cuda",
                 ) # bsz seqlen 1
+                
+                cu_seqlens = None
+                if args.varlen:
+                    cu_seqlens, _ = calculate_cu_seqlens(batch[:, :, 0], eos_id)
+                
             input_ids = batch[:, :, 0]
-            labels = input_ids
+            labels = input_ids.clone()
+                
 
             data_load_time = round(timer() - data_load_start, 4)
             nwords_since_last_log += input_ids.numel()
@@ -346,7 +365,6 @@ def train(args: TrainArgs):
             start_timer.record()
 
             if args.varlen:
-                cu_seqlens, _ = calculate_cu_seqlens(input_ids, eos_id)
                 output = model(input_ids=input_ids, labels=labels, cu_seqlens=cu_seqlens)
             else:
                 output = model(input_ids=input_ids, labels=labels)
@@ -374,6 +392,14 @@ def train(args: TrainArgs):
                     grad_norm.full_tensor() if isinstance(grad_norm, DTensor) else grad_norm
                 ).item()
 
+                # # NOTE check and skip the update if grad is abnormal
+                # # NOTE We had experienced the problem during long context scaling
+                # if not (math.isnan(grad_norm) or math.isinf(grad_norm)):
+                #     optimizer.step()
+                #     scheduler.step()
+                # else:
+                #     logger.info(f"WARNING: NaN or Inf gradient detected (grad_norm={grad_norm}). Skipping batch.")
+                
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
@@ -465,6 +491,7 @@ def train(args: TrainArgs):
             if every_n_steps(
                 train_state, args.checkpoint.dump.every, acc_step=0
             ):
+                
                 saved = checkpoint.save(
                     model,
                     optimizer,
